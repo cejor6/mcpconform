@@ -60,6 +60,14 @@ Phase 1 done: CLI engine (`src/`) with ajv-backed schema rules + `--mode strict`
 node src/index.mjs path/to/server.json .mcp.json tools.json --target anthropic,openai
 ```
 
-Next: the introspection front-end — `mcplint inspect <command>` to pull `tools/list` from a live server in any language (the last piece for linting servers you can't get a static dump from).
+Also includes `mcplint inspect -- <command>` — pulls `tools/list` from a live server in any language via the MCP stdio handshake, then lints it (for servers you can't get a static dump from):
+
+```sh
+node src/index.mjs inspect --target anthropic,openai -- python server.py
+```
+
+Servers that need env vars to start (API keys, etc.) inherit your shell env, or pass `--env-file .env` / `--env KEY=VAL`. Tool listing rarely makes network calls, so **placeholder values are usually enough** to get the tool surface. In CI, prefer linting a committed `tools/list` dump or `server.json` so no secrets are needed at all.
+
+Remaining before a 1.0 release: publish to npm / PyPI (when the maintainer gives the go).
 
 Spec baseline: **MCP 2025-11-25**.

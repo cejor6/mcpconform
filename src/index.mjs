@@ -11,21 +11,25 @@ import { runCoreRules, runProviderRules } from "./rules.mjs";
 import { runSchemaValidity } from "./schema.mjs";
 import { runServerJsonRules } from "./server-json.mjs";
 import { runClientConfigRules } from "./client-config.mjs";
+import { inspectStdio } from "./inspect.mjs";
 import { renderHuman, renderSarif } from "./report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const loadJSON = (p) => JSON.parse(readFileSync(p, "utf8"));
 
 function parseArgs(argv) {
-  const out = { _: [], target: [], format: "human", mode: "default", portable: false };
+  const out = { _: [], rest: [], target: [], format: "human", mode: "default", portable: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--target") out.target = (argv[++i] || "").split(",").filter(Boolean);
+    if (a === "--") { out.rest = argv.slice(i + 1); break; }
+    else if (a === "--target") out.target = (argv[++i] || "").split(",").filter(Boolean);
     else if (a === "--format") out.format = argv[++i];
     else if (a === "--mode") out.mode = argv[++i];
     else if (a === "--portable") out.portable = true;
     else if (a === "--type") out.type = argv[++i];
     else if (a === "--out") out.out = argv[++i];
+    else if (a === "--env-file") out.envFile = argv[++i];
+    else if (a === "--env") (out.envKv = out.envKv || []).push(argv[++i]);
     else if (a === "--config") out.config = argv[++i];
     else if (!a.startsWith("--")) out._.push(a);
   }
@@ -52,6 +56,21 @@ function detectType(doc) {
   if (doc && (doc.packages || doc.remotes || (typeof doc.$schema === "string" && /server.*schema/i.test(doc.$schema))))
     return "server-json";
   return "tools";
+}
+
+function parseEnvFile(p) {
+  const env = {};
+  if (!p || !existsSync(p)) return env;
+  for (const raw of readFileSync(p, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    let v = line.slice(eq + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    env[line.slice(0, eq).trim().replace(/^export\s+/, "")] = v;
+  }
+  return env;
 }
 
 function siblingPackageVersion(filePath) {
@@ -104,6 +123,51 @@ const activeProfiles = targetIds.map((id) => allProfiles[id]).filter(Boolean);
 
 const severityFor = (id) => sevOverrides[id] || ruleMeta[id]?.tier || "warn";
 const mode = args.mode || config.mode || "default";
+
+if (args._[0] === "inspect") {
+  const cmd = args.rest.length ? args.rest : args._.slice(1);
+  if (!cmd.length) {
+    console.error("usage: mcplint inspect [--target a,b] -- <command> [args...]");
+    process.exit(2);
+  }
+  const env = { ...parseEnvFile(args.envFile) };
+  for (const kv of args.envKv || []) {
+    const eq = kv.indexOf("=");
+    if (eq > 0) env[kv.slice(0, eq)] = kv.slice(eq + 1);
+  }
+  let tools;
+  try {
+    tools = await inspectStdio(cmd[0], cmd.slice(1), { env });
+  } catch (e) {
+    console.error(`mcplint inspect: ${e.message}`);
+    console.error(
+      "hint: if the server needs env vars to start, pass --env-file <.env> or --env KEY=VAL " +
+        "(tool listing rarely hits the network, so placeholder values are usually enough), " +
+        "or lint a static tools/list dump / server.json instead."
+    );
+    process.exit(2);
+  }
+  const label = `inspect:${cmd.join(" ")}`;
+  const findings = [];
+  const emit = (id, tool, message, profile = null) => {
+    const tier = severityFor(id);
+    if (tier === "off") return;
+    findings.push({ id, tier, tool: tool ?? null, message, profile, file: label });
+  };
+  runCoreRules(tools, emit);
+  runSchemaValidity(tools, emit);
+  if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
+  for (const p of activeProfiles)
+    if (p.verified === false && findings.some((f) => f.profile === p.id))
+      emit("meta/profile-unverified", null,
+        `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
+  const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
+  const meta = { summaries: [`${label}  [tools]  (${tools.length} tools, ${tgt})`], targets: targetIds, missing };
+  const output = args.format === "sarif" ? renderSarif(findings, ruleMeta, meta) : renderHuman(findings, ruleMeta, meta);
+  if (args.out) writeFileSync(resolve(args.out), output + "\n");
+  else console.log(output);
+  process.exit(findings.some((f) => f.tier === "error") ? 1 : 0);
+}
 
 function lintOne(fileArg) {
   const findings = [];

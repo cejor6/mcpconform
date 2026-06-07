@@ -7,6 +7,7 @@ import { runCoreRules, runProviderRules } from "../src/rules.mjs";
 import { validateInputSchema, checkProviderSchema } from "../src/schema.mjs";
 import { runServerJsonRules } from "../src/server-json.mjs";
 import { runClientConfigRules } from "../src/client-config.mjs";
+import { inspectStdio } from "../src/inspect.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
@@ -194,4 +195,20 @@ test("client-config: clean stdio + clean http pass", () => {
     },
   });
   assert.deepEqual(ids, []);
+});
+
+// --- inspect (live MCP stdio handshake) ---
+test("inspect: handshake returns tools from a live stdio server", async () => {
+  const tools = await inspectStdio("node", [join(ROOT, "test/fixtures/mock-server.mjs")], { timeoutMs: 10000 });
+  assert.equal(tools.length, 2);
+  assert.equal(tools[0].name, "bad.tool");
+  assert.equal(tools[1].name, "good_tool");
+});
+
+test("inspect: passes env vars through to the spawned server", async () => {
+  const tools = await inspectStdio("node", [join(ROOT, "test/fixtures/mock-server.mjs")], {
+    env: { MCPLINT_TEST: "xyz" },
+    timeoutMs: 10000,
+  });
+  assert.ok(tools.some((t) => t.name === "env_xyz"));
 });
