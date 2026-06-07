@@ -1,0 +1,29 @@
+{
+  "$schema": "./profile.schema.json",
+  "id": "openai",
+  "displayName": "OpenAI function calling",
+  "kind": "llm-provider",
+  "verified": true,
+  "source": "https://platform.openai.com/docs/guides/function-calling ; https://platform.openai.com/docs/guides/structured-outputs",
+  "lastVerified": "2026-06-07",
+  "toolName": { "pattern": "^[a-zA-Z0-9_-]{1,64}$", "maxLength": 64, "caseSensitive": true },
+  "toolDescription": { "maxLength": 1024 },
+  "tools": { "maxCount": 128, "maxTotalBytes": null },
+  "inputSchema": {
+    "dialect": "draft-2020-12",
+    "rootMustBeObject": true,
+    "allowsRefs": true,
+    "allowsRecursion": true,
+    "allowsAnyOf": true,
+    "unenforcedKeywords": ["pattern", "format", "minLength", "maxLength", "minimum", "maximum", "multipleOf", "minItems", "maxItems"],
+    "maxNestingDepth": null
+  },
+  "strict": {
+    "requiresAdditionalPropertiesFalse": true,
+    "requiresAllPropertiesRequired": true,
+    "rejectsUnenforcedKeywords": true,
+    "maxNestingDepth": 5,
+    "maxProperties": 100
+  },
+  "notes": "Name regex (`^[a-zA-Z0-9_-]{1,64}$`) and the 1024-char description cap are confirmed. tools.maxCount=128 is the documented soft recommendation (verify against your account/model). Default mode: pattern/format/min*/max* are accepted but NOT enforced by the model. strict:true requires additionalProperties:false on every object and ALL properties listed in required (express optionals as a null union, e.g. type:[\"string\",\"null\"]); it caps nesting at 5 levels and ~100 total object properties."
+}

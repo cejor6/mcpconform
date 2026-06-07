@@ -1,0 +1,22 @@
+{
+  "specBaseline": "mcp-2025-11-25",
+
+  "targets": ["anthropic"],
+  "portable": false,
+  "mode": "default",
+
+  "profilesDir": "./profiles",
+
+  "rules": {
+    "tool/name-unique": "error",
+    "client-config/no-hardcoded-secrets": "warn",
+    "tool/description-length": "warn"
+  },
+
+  "_help": {
+    "targets": "Consumer profile id(s) to check tool definitions against. [] = pure MCP-spec checks only (fully provider-agnostic, the default if omitted). Multiple ids = portable intersection (a tool must satisfy ALL).",
+    "portable": "true = check against every profile in profilesDir (equivalent to targeting all). Or target the precomputed 'generic-strict' profile.",
+    "mode": "'default' or 'strict'. 'strict' additionally applies each profile's strict{} block (e.g. OpenAI additionalProperties:false + all-required).",
+    "rules": "Per-rule severity overrides: error | warn | info | off."
+  }
+}

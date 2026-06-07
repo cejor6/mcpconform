@@ -1,0 +1,29 @@
+{
+  "$schema": "./profile.schema.json",
+  "id": "generic-strict",
+  "displayName": "Portable (strictest common denominator of all verified profiles)",
+  "kind": "synthetic",
+  "verified": true,
+  "source": "computed: intersection of anthropic + openai + gemini (each verified)",
+  "lastVerified": "2026-06-07",
+  "toolName": { "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$", "maxLength": 64, "caseSensitive": true },
+  "toolDescription": { "maxLength": 1024 },
+  "tools": { "maxCount": 128, "maxTotalBytes": null },
+  "inputSchema": {
+    "dialect": "subset",
+    "rootMustBeObject": true,
+    "supportedKeywords": ["type", "description", "properties", "items", "required", "enum", "nullable", "format"],
+    "allowsRefs": false,
+    "allowsRecursion": false,
+    "allowsAnyOf": false,
+    "maxNestingDepth": 5
+  },
+  "strict": {
+    "requiresAdditionalPropertiesFalse": true,
+    "requiresAllPropertiesRequired": true,
+    "rejectsUnenforcedKeywords": true,
+    "maxNestingDepth": 5,
+    "maxProperties": 100
+  },
+  "notes": "Pre-computed strictest-common-denominator so a server author can lint for 'works on every major provider' without naming each one (`--portable`). Name: no dots (Anthropic + OpenAI forbid), no leading digit (Gemini forbids), <=64 chars. Schema: an OpenAPI-ish subset that survives Gemini's allowlist AND OpenAI strict mode simultaneously. The engine can also compute this intersection on the fly from `targets`; this file is the convenience default."
+}

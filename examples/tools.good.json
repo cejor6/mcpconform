@@ -1,0 +1,16 @@
+{
+  "tools": [
+    {
+      "name": "get_weather",
+      "title": "Get Weather",
+      "description": "Get the current weather for a city. Use when the user asks about current conditions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "location": { "type": "string", "description": "City and state, e.g. Austin, TX" } },
+        "required": ["location"],
+        "additionalProperties": false
+      },
+      "annotations": { "readOnlyHint": true }
+    }
+  ]
+}

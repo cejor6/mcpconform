@@ -1,0 +1,15 @@
+{
+  "name": "mcplint",
+  "version": "0.1.0",
+  "description": "Provider- and language-agnostic static linter for MCP tool definitions, server.json, and client config.",
+  "type": "module",
+  "bin": { "mcplint": "src/index.mjs" },
+  "scripts": {
+    "test": "node --test",
+    "lint:bad": "node src/index.mjs examples/tools.bad.json --target anthropic,openai",
+    "lint:good": "node src/index.mjs examples/tools.good.json --target anthropic,openai"
+  },
+  "files": ["src", "profiles", "rules.json"],
+  "keywords": ["mcp", "model-context-protocol", "linter", "lint", "tools", "sarif"],
+  "license": "MIT"
+}

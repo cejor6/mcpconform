@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcplint.dev/schemas/profile.schema.json",
+  "title": "mcplint consumer profile",
+  "description": "Declarative capability profile for a tool-definition CONSUMER — an LLM-provider tool-use API (Anthropic, OpenAI, Gemini, ...) or an MCP host (Claude Desktop, Cursor, ...). mcplint is provider-agnostic: every consumer, including the MCP spec itself, is described by one of these files. No vendor is privileged in the engine; the generic provider/* rule family reads whichever profile(s) the run targets.",
+  "type": "object",
+  "required": ["id", "kind", "verified"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "displayName": { "type": "string" },
+    "kind": {
+      "enum": ["llm-provider", "mcp-host", "synthetic", "spec-baseline"],
+      "description": "synthetic = a computed intersection (e.g. generic-strict). spec-baseline = an MCP spec revision modelled as a profile."
+    },
+    "verified": {
+      "type": "boolean",
+      "description": "true ONLY when every constraint below was read from the consumer's own documentation (cited in `source`). Findings that rely on a verified:false profile are flagged by meta/profile-unverified so a guessed number never reads as gospel."
+    },
+    "source": { "type": "string", "description": "URL(s) of the doc the constraints came from. Required when verified=true." },
+    "lastVerified": { "type": "string", "format": "date" },
+    "notes": { "type": "string" },
+
+    "toolName": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pattern": { "type": "string", "description": "ECMA regex the full tool name must match." },
+        "maxLength": { "type": ["integer", "null"] },
+        "caseSensitive": { "type": "boolean", "default": true }
+      }
+    },
+    "toolDescription": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "maxLength": { "type": ["integer", "null"], "description": "null = no documented cap." } }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxCount": { "type": ["integer", "null"], "description": "Max number of tool definitions accepted in one request." },
+        "maxTotalBytes": { "type": ["integer", "null"], "description": "Budget on the serialized tool set, if the consumer documents one." }
+      }
+    },
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dialect": { "enum": ["draft-2020-12", "draft-07", "openapi-3.0", "subset"] },
+        "rootMustBeObject": { "type": "boolean" },
+        "supportedKeywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "ALLOWLIST. If present, any JSON-Schema keyword NOT in this list is treated as unsupported. Use for allowlist consumers like Gemini's OpenAPI subset."
+        },
+        "unsupportedKeywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "DENYLIST of keywords the consumer rejects (error)."
+        },
+        "unenforcedKeywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keywords accepted but silently ignored (won't constrain model output) — flagged at info by default, promoted to error when a strict mode rejects them."
+        },
+        "supportedStringFormats": { "type": "array", "items": { "type": "string" } },
+        "allowsRefs": { "type": "boolean" },
+        "allowsRecursion": { "type": "boolean" },
+        "allowsAnyOf": { "type": "boolean" },
+        "maxNestingDepth": { "type": ["integer", "null"] },
+        "maxProperties": { "type": ["integer", "null"] }
+      }
+    },
+    "strict": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Extra constraints that apply ONLY when the consumer's strict / structured-output mode is enabled for this target (config: mode='strict').",
+      "properties": {
+        "requiresAdditionalPropertiesFalse": { "type": "boolean" },
+        "requiresAllPropertiesRequired": { "type": "boolean" },
+        "rejectsUnenforcedKeywords": { "type": "boolean" },
+        "maxNestingDepth": { "type": ["integer", "null"] },
+        "maxProperties": { "type": ["integer", "null"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "verified": { "const": true } }, "required": ["verified"] },
+      "then": { "required": ["source", "lastVerified"] }
+    }
+  ]
+}

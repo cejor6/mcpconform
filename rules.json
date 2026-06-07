@@ -1,0 +1,505 @@
+{
+  "version": "0.1.0",
+  "specBaseline": "mcp-2025-11-25",
+  "tiers": {
+    "error": "MCP spec MUST, schema-invalid, or a declared consumer will hard-reject (a 400).",
+    "warn": "MCP spec SHOULD, or a high-value correctness convention.",
+    "info": "Opinionated quality; default-on but downgradeable. AI-judged rules slot in here later."
+  },
+  "notes": "provider/* rules are PARAMETERIZED and provider-agnostic: each reads the active profile(s) declared in config.targets (or every profile under --portable). They are inert when no target is set. `reads` names the profile field consulted. No vendor is hardcoded in the engine.",
+  "rules": [
+    {
+      "id": "tool/name-required",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "schema.ts BaseMetadata.name (required)",
+      "message": "Tool `name` must be present and non-empty.",
+      "bad": "{ \"description\": \"...\" }",
+      "good": "{ \"name\": \"get_weather\", \"description\": \"...\" }"
+    },
+    {
+      "id": "tool/name-charset",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "tools spec > Tool Names (SHOULD)",
+      "message": "Tool name should use only A-Z a-z 0-9 _ - . (no spaces or special chars).",
+      "bad": "\"get weather!\"",
+      "good": "\"get_weather\""
+    },
+    {
+      "id": "tool/name-length",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "tools spec > Tool Names (SHOULD): 1-128 chars",
+      "message": "Tool name should be 1-128 characters.",
+      "bad": "200-character name",
+      "good": "<=128 characters"
+    },
+    {
+      "id": "tool/name-unique",
+      "tier": "error",
+      "appliesTo": "tool-set",
+      "source": "tools spec (SHOULD, elevated: duplicates break client dispatch)",
+      "message": "Tool names must be unique within a server.",
+      "bad": "two tools both named \"search\"",
+      "good": "\"search_web\", \"search_docs\""
+    },
+    {
+      "id": "tool/input-schema-required",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "schema.ts Tool.inputSchema (non-optional) + tools spec \"MUST be a valid JSON Schema object (not null)\"",
+      "message": "`inputSchema` must be present and non-null.",
+      "bad": "(omitted)",
+      "good": "{ \"type\": \"object\" }"
+    },
+    {
+      "id": "tool/input-schema-root-object",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "schema.ts Tool.inputSchema.type: \"object\"",
+      "message": "inputSchema root `type` must be \"object\".",
+      "bad": "{ \"type\": \"array\" }",
+      "good": "{ \"type\": \"object\", \"properties\": {} }"
+    },
+    {
+      "id": "tool/input-schema-valid",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "tools spec > JSON Schema usage (default draft 2020-12)",
+      "message": "inputSchema must be a valid JSON Schema in the declared/default dialect.",
+      "bad": "{ \"type\": \"object\", \"properties\": \"nope\" }",
+      "good": "{ \"type\": \"object\", \"properties\": { \"q\": { \"type\": \"string\" } } }"
+    },
+    {
+      "id": "tool/required-references-properties",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "JSON Schema semantics",
+      "message": "Every name in `required` must exist in `properties`.",
+      "bad": "required:[\"city\"] with properties.location",
+      "good": "required:[\"location\"] with properties.location"
+    },
+    {
+      "id": "tool/no-params-shape",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "tools spec (Recommended form for zero-param tools)",
+      "message": "Zero-parameter tools should use { type: object, additionalProperties: false }.",
+      "bad": "{}",
+      "good": "{ \"type\": \"object\", \"additionalProperties\": false }"
+    },
+    {
+      "id": "tool/output-schema-root-object",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "schema.ts Tool.outputSchema (root restricted to type object)",
+      "message": "When present, outputSchema root `type` must be \"object\".",
+      "bad": "{ \"type\": \"array\" }",
+      "good": "{ \"type\": \"object\", \"properties\": {} }"
+    },
+    {
+      "id": "tool/output-schema-implies-structured",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "tools spec > Output Schema (server MUST return conforming structuredContent; runtime -> info)",
+      "message": "Declaring outputSchema obligates the server to return matching structuredContent (and a serialized copy in a text block for back-compat)."
+    },
+    {
+      "id": "tool/description-present",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "schema.ts description? (optional) + best practice",
+      "message": "Tool should have a non-empty description.",
+      "bad": "(no description)",
+      "good": "\"Get current weather for a city...\""
+    },
+    {
+      "id": "tool/description-length",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "not spec — client truncation behavior (configurable, default 1024)",
+      "message": "Description exceeds the configured budget; some clients truncate.",
+      "bad": "5 KB description",
+      "good": "concise, high-signal description"
+    },
+    {
+      "id": "tool/property-descriptions",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "best practice (Anthropic: \"extremely detailed descriptions\")",
+      "message": "Each property in inputSchema should carry a description.",
+      "bad": "\"location\": { \"type\": \"string\" }",
+      "good": "\"location\": { \"type\": \"string\", \"description\": \"City and state\" }"
+    },
+    {
+      "id": "tool/enum-for-closed-set",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "best practice",
+      "message": "Description implies a fixed set of values; use an enum.",
+      "bad": "desc says 'celsius or fahrenheit', type free string",
+      "good": "\"enum\": [\"celsius\", \"fahrenheit\"]"
+    },
+    {
+      "id": "tool/destructive-needs-annotation",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "schema.ts ToolAnnotations + tools spec (clients MUST treat annotations as untrusted)",
+      "message": "Mutating-verb tool name lacks annotations (destructiveHint defaults to TRUE; readOnly tools should say so).",
+      "bad": "\"delete_order\" with no annotations",
+      "good": "annotations: { \"destructiveHint\": true } (or readOnlyHint:true for queries)"
+    },
+    {
+      "id": "tool/annotations-consistency",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "schema.ts ToolAnnotations field comments",
+      "message": "destructiveHint/idempotentHint are meaningful only when readOnlyHint is false.",
+      "bad": "{ \"readOnlyHint\": true, \"destructiveHint\": true }",
+      "good": "{ \"readOnlyHint\": true }"
+    },
+    {
+      "id": "tool/title-redundant",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "schema.ts BaseMetadata + Tool display-name precedence (title > annotations.title > name)",
+      "message": "title equal to name adds nothing; omit it or make it human-readable.",
+      "bad": "name:\"get_weather\", title:\"get_weather\"",
+      "good": "name:\"get_weather\", title:\"Get Weather\""
+    },
+    {
+      "id": "tool/execution-tasksupport-enum",
+      "tier": "error",
+      "appliesTo": "tool",
+      "source": "schema.ts ToolExecution.taskSupport",
+      "message": "execution.taskSupport must be one of forbidden | optional | required.",
+      "bad": "\"maybe\"",
+      "good": "\"optional\""
+    },
+    {
+      "id": "tool/meta-reserved-keys",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "spec _meta rules (reverse-DNS; modelcontextprotocol.io reserved)",
+      "message": "_meta keys must be reverse-DNS namespaced; the modelcontextprotocol.io namespace is reserved.",
+      "bad": "_meta: { \"foo\": 1 }",
+      "good": "_meta: { \"com.acme/foo\": 1 }"
+    },
+    {
+      "id": "tool/icon-mime",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "schema.ts Icon/Icons (clients MUST support png+jpeg; SVG flagged)",
+      "message": "Icons should include a png/jpeg; SVG and data: URIs carry executable-content risk.",
+      "bad": "only image/svg+xml",
+      "good": "include an image/png icon"
+    },
+
+    {
+      "id": "provider/name-pattern",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "toolName.pattern",
+      "source": "active profile(s)",
+      "message": "Tool name fails the targeted consumer's name pattern.",
+      "bad": "\"admin.tools.list\" (spec-legal) vs anthropic ^[a-zA-Z0-9_-]{1,64}$",
+      "good": "\"admin_tools_list\""
+    },
+    {
+      "id": "provider/name-length",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "toolName.maxLength",
+      "source": "active profile(s)",
+      "message": "Tool name exceeds the targeted consumer's max length.",
+      "bad": "70-char name vs anthropic/openai max 64",
+      "good": "<=64 chars"
+    },
+    {
+      "id": "provider/description-length",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "toolDescription.maxLength",
+      "source": "active profile(s)",
+      "message": "Description exceeds the targeted consumer's cap.",
+      "bad": "1500 chars vs openai max 1024",
+      "good": "<=1024 chars (move detail to the prompt)"
+    },
+    {
+      "id": "provider/tool-count",
+      "tier": "error",
+      "appliesTo": "tool-set",
+      "family": "provider",
+      "reads": "tools.maxCount",
+      "source": "active profile(s)",
+      "message": "Tool count exceeds the targeted consumer's maximum."
+    },
+    {
+      "id": "provider/total-size",
+      "tier": "warn",
+      "appliesTo": "tool-set",
+      "family": "provider",
+      "reads": "tools.maxTotalBytes",
+      "source": "active profile(s)",
+      "message": "Serialized tool set exceeds the targeted consumer's size budget."
+    },
+    {
+      "id": "provider/schema-unsupported-keyword",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "inputSchema.supportedKeywords | inputSchema.unsupportedKeywords",
+      "source": "active profile(s)",
+      "message": "inputSchema uses a keyword the targeted consumer rejects (allowlist or denylist).",
+      "bad": "anyOf in a gemini target (not in its supportedKeywords)",
+      "good": "restructure without anyOf, or drop the gemini target"
+    },
+    {
+      "id": "provider/schema-unenforced-keyword",
+      "tier": "info",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "inputSchema.unenforcedKeywords",
+      "source": "active profile(s)",
+      "message": "Keyword is accepted but not enforced by the targeted consumer (no effect on output). Promoted to error under strict mode if strict.rejectsUnenforcedKeywords.",
+      "bad": "minLength on openai/anthropic (ignored)",
+      "good": "validate the constraint yourself, or use strict mode"
+    },
+    {
+      "id": "provider/schema-additional-properties",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "strict.requiresAdditionalPropertiesFalse",
+      "source": "active profile(s), mode=strict",
+      "message": "Strict mode requires additionalProperties:false on every object.",
+      "bad": "{ \"type\": \"object\", \"properties\": {...} }",
+      "good": "{ \"type\": \"object\", \"properties\": {...}, \"additionalProperties\": false }"
+    },
+    {
+      "id": "provider/schema-all-required",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "strict.requiresAllPropertiesRequired",
+      "source": "active profile(s), mode=strict (e.g. openai)",
+      "message": "Strict mode requires every property listed in `required`; express optionals as a null union.",
+      "bad": "optional \"unit\" omitted from required",
+      "good": "required:[\"location\",\"unit\"], unit type: [\"string\",\"null\"]"
+    },
+    {
+      "id": "provider/schema-max-depth",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "inputSchema.maxNestingDepth | strict.maxNestingDepth",
+      "source": "active profile(s)",
+      "message": "inputSchema nesting exceeds the targeted consumer's max depth.",
+      "bad": "6 levels vs openai strict max 5",
+      "good": "flatten to <=5 levels"
+    },
+    {
+      "id": "provider/schema-no-refs",
+      "tier": "error",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "inputSchema.allowsRefs / allowsRecursion / allowsAnyOf",
+      "source": "active profile(s)",
+      "message": "inputSchema uses $ref / recursion / anyOf that the targeted consumer does not allow.",
+      "bad": "$ref in a gemini (baseline) target",
+      "good": "inline the definition"
+    },
+
+    {
+      "id": "server-json/name-reverse-dns",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema",
+      "message": "server.json `name` must be reverse-DNS.",
+      "bad": "\"my-server\"",
+      "good": "\"io.github.you/my-server\""
+    },
+    {
+      "id": "server-json/version-semver",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema",
+      "message": "`version` must be semver.",
+      "bad": "\"v1\"",
+      "good": "\"1.2.0\""
+    },
+    {
+      "id": "server-json/packages-or-remotes",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema (one required)",
+      "message": "At least one of `packages` or `remotes` is required.",
+      "bad": "neither present",
+      "good": "packages: [ ... ]"
+    },
+    {
+      "id": "server-json/registry-type-enum",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema",
+      "message": "packages[].registryType must be one of npm|pypi|cargo|nuget|oci|mcpb.",
+      "bad": "\"pip\"",
+      "good": "\"pypi\""
+    },
+    {
+      "id": "server-json/registry-base-url",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema (conditional)",
+      "message": "registryBaseUrl is required for npm/pypi/cargo/nuget package types."
+    },
+    {
+      "id": "server-json/transport-type-enum",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema",
+      "message": "transport.type must be one of stdio|streamable-http|sse.",
+      "bad": "\"http\"",
+      "good": "\"streamable-http\""
+    },
+    {
+      "id": "server-json/transport-url",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema (conditional)",
+      "message": "transport.url is required for streamable-http and sse.",
+      "bad": "type streamable-http, no url",
+      "good": "url present"
+    },
+    {
+      "id": "server-json/mcpb-sha",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema (conditional)",
+      "message": "fileSha256 is required when registryType is mcpb."
+    },
+    {
+      "id": "server-json/version-matches-package",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "category": "cross-file",
+      "source": "registry server.json schema + package manifest cross-check",
+      "message": "Root version should equal packages[].version and the package.json/pyproject.toml version.",
+      "bad": "server.json 1.2.0 / package.json 1.1.0",
+      "good": "all three aligned"
+    },
+    {
+      "id": "server-json/arg-named-requires-name",
+      "tier": "error",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema (argument object)",
+      "message": "An argument with type:\"named\" must include a `name`."
+    },
+    {
+      "id": "server-json/env-secret-flag",
+      "tier": "warn",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema (environmentVariables)",
+      "message": "Secret-looking environment variables should set isSecret:true."
+    },
+    {
+      "id": "server-json/url-https",
+      "tier": "warn",
+      "appliesTo": "server-json",
+      "source": "registry server.json schema",
+      "message": "Transport/remote URLs should use https."
+    },
+
+    {
+      "id": "client-config/valid-json",
+      "tier": "error",
+      "appliesTo": "client-config",
+      "source": "client config convention (no MCP spec)",
+      "message": "Config must parse as JSON (JSONC where the client allows)."
+    },
+    {
+      "id": "client-config/one-transport",
+      "tier": "error",
+      "appliesTo": "client-config",
+      "source": "client config convention",
+      "message": "Each server needs exactly one valid transport: stdio (command [+args]) XOR http/sse (url).",
+      "bad": "both command and url present",
+      "good": "command + args, OR url"
+    },
+    {
+      "id": "client-config/args-array",
+      "tier": "error",
+      "appliesTo": "client-config",
+      "source": "client config convention",
+      "message": "`args` must be an array of strings.",
+      "bad": "\"args\": \"--port 3000\"",
+      "good": "\"args\": [\"--port\", \"3000\"]"
+    },
+    {
+      "id": "client-config/http-url-required",
+      "tier": "error",
+      "appliesTo": "client-config",
+      "source": "client config convention",
+      "message": "An http/sse server entry needs a url."
+    },
+    {
+      "id": "client-config/env-values-strings",
+      "tier": "error",
+      "appliesTo": "client-config",
+      "source": "client config convention",
+      "message": "`env` values must be strings.",
+      "bad": "\"PORT\": 3000",
+      "good": "\"PORT\": \"3000\""
+    },
+    {
+      "id": "client-config/no-hardcoded-secrets",
+      "tier": "warn",
+      "appliesTo": "client-config",
+      "source": "security convention (secret-scan tie-in)",
+      "message": "Secret-looking literal in env/headers (sk-, ghp_, AKIA, JWT, long hex). Reference an env var instead.",
+      "bad": "\"API_KEY\": \"sk-live-abc123\"",
+      "good": "\"API_KEY\": \"${API_KEY}\""
+    },
+    {
+      "id": "client-config/env-refs-declared",
+      "tier": "warn",
+      "appliesTo": "client-config",
+      "source": "client config convention",
+      "message": "${VAR} references should be resolvable/declared."
+    },
+    {
+      "id": "client-config/url-https",
+      "tier": "warn",
+      "appliesTo": "client-config",
+      "source": "client config convention",
+      "message": "Remote server url should use https."
+    },
+    {
+      "id": "client-config/known-keys",
+      "tier": "warn",
+      "appliesTo": "client-config",
+      "category": "per-client",
+      "source": "per-client config schema",
+      "message": "Unknown or deprecated key for the detected client."
+    },
+
+    {
+      "id": "meta/spec-version",
+      "tier": "info",
+      "appliesTo": "meta",
+      "source": "this catalog (pinned to mcp-2025-11-25)",
+      "message": "Declare the target MCP spec revision so MUST/SHOULD severities are accurate; rules are version-aware."
+    },
+    {
+      "id": "meta/profile-unverified",
+      "tier": "info",
+      "appliesTo": "meta",
+      "source": "profile.verified flag",
+      "message": "A finding relied on a profile with verified:false; its constraints are unconfirmed. Source the numbers from the consumer's docs before trusting it."
+    }
+  ]
+}

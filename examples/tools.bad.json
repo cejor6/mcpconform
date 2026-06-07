@@ -1,0 +1,11 @@
+{
+  "tools": [
+    { "name": "admin.tools.list", "description": "List admin tools.", "inputSchema": { "type": "object" } },
+    { "name": "get weather", "description": "Get weather.", "inputSchema": { "type": "object" } },
+    { "name": "search", "description": "Search once.", "inputSchema": { "type": "object" } },
+    { "name": "search", "inputSchema": { "type": "object" } },
+    { "name": "report_build", "description": "Build a report.", "inputSchema": { "type": "array" } },
+    { "name": "lookup", "description": "Look up by id.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["identifier"] } },
+    { "name": "delete_account", "description": "Delete an account permanently.", "inputSchema": { "type": "object", "properties": { "id": { "type": "string", "description": "Account id" } }, "required": ["id"] } }
+  ]
+}

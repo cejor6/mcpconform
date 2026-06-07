@@ -1,0 +1,22 @@
+{
+  "$schema": "./profile.schema.json",
+  "id": "gemini",
+  "displayName": "Google Gemini API (function declarations)",
+  "kind": "llm-provider",
+  "verified": true,
+  "source": "https://ai.google.dev/gemini-api/docs/function-calling ; https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1beta1/FunctionDeclaration",
+  "lastVerified": "2026-06-07",
+  "toolName": { "pattern": "^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$", "maxLength": 64, "caseSensitive": true },
+  "toolDescription": { "maxLength": null },
+  "tools": { "maxCount": null, "maxTotalBytes": null },
+  "inputSchema": {
+    "dialect": "openapi-3.0",
+    "rootMustBeObject": true,
+    "supportedKeywords": ["type", "nullable", "required", "format", "description", "properties", "items", "enum", "minimum", "maximum"],
+    "allowsRefs": false,
+    "allowsRecursion": false,
+    "allowsAnyOf": false,
+    "maxNestingDepth": null
+  },
+  "notes": "Name must start with a letter or underscore; dots and dashes are allowed thereafter; max 64 (confirmed). Parameters use an OpenAPI-3.0 SUBSET — the allowlist shown is the Vertex/Firebase baseline. default, oneOf, exclusiveMinimum/exclusiveMaximum, and additionalProperties are not supported. The Gemini Enterprise variant additionally supports anyOf/$ref/$defs — model that as a separate `gemini-enterprise` profile if you target it. Very large or deeply nested schemas may be rejected at request time."
+}

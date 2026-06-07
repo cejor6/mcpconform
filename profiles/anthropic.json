@@ -1,0 +1,29 @@
+{
+  "$schema": "./profile.schema.json",
+  "id": "anthropic",
+  "displayName": "Anthropic Messages API (tool use)",
+  "kind": "llm-provider",
+  "verified": true,
+  "source": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools",
+  "lastVerified": "2026-06-07",
+  "toolName": { "pattern": "^[a-zA-Z0-9_-]{1,64}$", "maxLength": 64, "caseSensitive": true },
+  "toolDescription": { "maxLength": null },
+  "tools": { "maxCount": null, "maxTotalBytes": null },
+  "inputSchema": {
+    "dialect": "draft-2020-12",
+    "rootMustBeObject": true,
+    "allowsRefs": true,
+    "allowsRecursion": true,
+    "allowsAnyOf": true,
+    "supportedStringFormats": ["date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid"],
+    "unenforcedKeywords": ["minimum", "maximum", "multipleOf", "minLength", "maxLength", "minItems", "maxItems", "pattern", "format"],
+    "maxNestingDepth": null
+  },
+  "strict": {
+    "requiresAdditionalPropertiesFalse": true,
+    "requiresAllPropertiesRequired": false,
+    "rejectsUnenforcedKeywords": true,
+    "maxNestingDepth": null
+  },
+  "notes": "Tool-name regex confirmed from the define-tools page. No documented description-length or tool-count cap (bounded by the request token limit; the API charges a per-request tool-use system-prompt overhead instead). Default tool use passes input_schema to the model as hints, so numeric/string constraints are not enforced. Under strict:true (structured outputs) those keywords plus recursion and additionalProperties!=false are unsupported; the official SDKs strip + validate them client-side."
+}
