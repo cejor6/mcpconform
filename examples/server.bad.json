@@ -1,0 +1,14 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "my-server",
+  "version": "v1",
+  "packages": [
+    {
+      "registryType": "pip",
+      "identifier": "my-server",
+      "version": "0.9.0",
+      "transport": { "type": "http" },
+      "environmentVariables": [{ "name": "API_KEY" }]
+    }
+  ]
+}

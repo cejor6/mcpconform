@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "weather": { "command": "python", "url": "https://x.example/mcp", "args": "server.py" },
+    "remote": { "type": "http", "url": "http://insecure.example/mcp" },
+    "leaky": {
+      "command": "node",
+      "args": ["server.js"],
+      "env": { "API_KEY": "sk-live-abcdefghij1234567890", "PORT": 3000 }
+    }
+  }
+}

@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { runCoreRules, runProviderRules } from "./rules.mjs";
 import { runSchemaValidity } from "./schema.mjs";
+import { runServerJsonRules } from "./server-json.mjs";
+import { runClientConfigRules } from "./client-config.mjs";
 import { renderHuman, renderSarif } from "./report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,6 +24,7 @@ function parseArgs(argv) {
     else if (a === "--format") out.format = argv[++i];
     else if (a === "--mode") out.mode = argv[++i];
     else if (a === "--portable") out.portable = true;
+    else if (a === "--type") out.type = argv[++i];
     else if (a === "--config") out.config = argv[++i];
     else if (!a.startsWith("--")) out._.push(a);
   }
@@ -40,6 +43,32 @@ function loadProfiles(dir) {
     }
   }
   return out;
+}
+
+function detectType(doc) {
+  if (Array.isArray(doc)) return "tools";
+  if (doc && (doc.mcpServers || doc.servers)) return "client-config";
+  if (doc && (doc.packages || doc.remotes || (typeof doc.$schema === "string" && /server.*schema/i.test(doc.$schema))))
+    return "server-json";
+  return "tools";
+}
+
+function siblingPackageVersion(filePath) {
+  const dir = dirname(filePath);
+  const pkg = join(dir, "package.json");
+  if (existsSync(pkg)) {
+    try {
+      return loadJSON(pkg).version || null;
+    } catch {
+      /* ignore */
+    }
+  }
+  const py = join(dir, "pyproject.toml");
+  if (existsSync(py)) {
+    const m = readFileSync(py, "utf8").match(/^\s*version\s*=\s*["']([^"']+)["']/m);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -72,9 +101,6 @@ if (args.portable || config.portable)
 const missing = targetIds.filter((id) => !allProfiles[id]);
 const activeProfiles = targetIds.map((id) => allProfiles[id]).filter(Boolean);
 
-const artifact = loadJSON(resolve(args._[0]));
-const tools = Array.isArray(artifact) ? artifact : artifact.tools || [];
-
 const findings = [];
 const severityFor = (id) => sevOverrides[id] || ruleMeta[id]?.tier || "warn";
 function emit(id, tool, message, profile = null) {
@@ -83,25 +109,35 @@ function emit(id, tool, message, profile = null) {
   findings.push({ id, tier, tool: tool ?? null, message, profile });
 }
 
+const artifactPath = resolve(args._[0]);
+const artifact = loadJSON(artifactPath);
+const type = args.type || detectType(artifact);
 const mode = args.mode || config.mode || "default";
-runCoreRules(tools, emit);
-runSchemaValidity(tools, emit);
-if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
+let summary = `[${type}]`;
 
-for (const p of activeProfiles)
-  if (p.verified === false && findings.some((f) => f.profile === p.id))
-    emit(
-      "meta/profile-unverified",
-      null,
-      `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`,
-      p.id
-    );
+if (type === "tools") {
+  const tools = Array.isArray(artifact) ? artifact : artifact.tools || [];
+  runCoreRules(tools, emit);
+  runSchemaValidity(tools, emit);
+  if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
+  for (const p of activeProfiles)
+    if (p.verified === false && findings.some((f) => f.profile === p.id))
+      emit("meta/profile-unverified", null,
+        `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
+  const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
+  summary = `[tools]  (${tools.length} tools, ${tgt})`;
+} else if (type === "server-json") {
+  runServerJsonRules(artifact, emit, { packageVersion: siblingPackageVersion(artifactPath) });
+  summary = `[server.json]  (${(artifact.packages || []).length} package(s), ${(artifact.remotes || []).length} remote(s))`;
+} else if (type === "client-config") {
+  runClientConfigRules(artifact, emit);
+  const n = Object.keys(artifact.mcpServers || artifact.servers || {}).length;
+  summary = `[client-config]  (${n} server(s))`;
+}
 
-const meta = { file: args._[0], toolCount: tools.length, targets: targetIds, missing };
+const meta = { file: args._[0], summary, targets: targetIds, missing };
 console.log(
-  args.format === "sarif"
-    ? renderSarif(findings, ruleMeta, meta)
-    : renderHuman(findings, ruleMeta, meta)
+  args.format === "sarif" ? renderSarif(findings, ruleMeta, meta) : renderHuman(findings, ruleMeta, meta)
 );
 
 process.exit(findings.some((f) => f.tier === "error") ? 1 : 0);

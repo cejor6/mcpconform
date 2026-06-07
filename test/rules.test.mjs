@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runCoreRules, runProviderRules } from "../src/rules.mjs";
 import { validateInputSchema, checkProviderSchema } from "../src/schema.mjs";
+import { runServerJsonRules } from "../src/server-json.mjs";
+import { runClientConfigRules } from "../src/client-config.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
@@ -131,4 +133,65 @@ test("openai strict: property missing from required flags", () => {
 test("clean object schema passes gemini subset", () => {
   const s = { type: "object", properties: { location: { type: "string", description: "City" } }, required: ["location"] };
   assert.deepEqual(pschema(s, "gemini"), []);
+});
+
+// --- server.json ---
+function sj(doc, opts) {
+  const f = [];
+  runServerJsonRules(doc, (id) => f.push(id), opts);
+  return f;
+}
+
+test("server.json: bad name/version/registry/transport flagged", () => {
+  const ids = sj({ name: "my-server", version: "v1", packages: [{ registryType: "pip", transport: { type: "http" } }] });
+  for (const id of [
+    "server-json/name-reverse-dns",
+    "server-json/version-semver",
+    "server-json/registry-type-enum",
+    "server-json/transport-type-enum",
+  ])
+    assert.ok(ids.includes(id), id);
+});
+
+test("server.json: clean doc passes", () => {
+  const ids = sj({
+    name: "io.github.you/srv",
+    version: "1.0.0",
+    packages: [{ registryType: "pypi", registryBaseUrl: "https://pypi.org", identifier: "srv", version: "1.0.0", transport: { type: "stdio" } }],
+  });
+  assert.deepEqual(ids, []);
+});
+
+test("server.json: root version mismatch vs sibling manifest", () => {
+  const ids = sj({ name: "io.github.you/srv", version: "1.0.0", remotes: [{ type: "sse", url: "https://x/mcp" }] }, { packageVersion: "0.9.0" });
+  assert.ok(ids.includes("server-json/version-matches-package"));
+});
+
+// --- client config ---
+function cc(doc) {
+  const f = [];
+  runClientConfigRules(doc, (id) => f.push(id));
+  return f;
+}
+
+test("client-config: both transports + non-array args flagged", () => {
+  const ids = cc({ mcpServers: { x: { command: "python", url: "https://y", args: "a.py" } } });
+  assert.ok(ids.includes("client-config/one-transport"));
+  assert.ok(ids.includes("client-config/args-array"));
+});
+
+test("client-config: hardcoded secret + non-string env flagged", () => {
+  const ids = cc({ mcpServers: { x: { command: "node", args: ["s.js"], env: { API_KEY: "sk-live-abcdefghij1234567890", PORT: 3000 } } } });
+  assert.ok(ids.includes("client-config/no-hardcoded-secrets"));
+  assert.ok(ids.includes("client-config/env-values-strings"));
+});
+
+test("client-config: clean stdio + clean http pass", () => {
+  const ids = cc({
+    mcpServers: {
+      a: { command: "node", args: ["s.js"], env: { TOKEN: "${TOKEN}" } },
+      b: { type: "http", url: "https://x/mcp" },
+    },
+  });
+  assert.deepEqual(ids, []);
 });

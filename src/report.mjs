@@ -5,8 +5,7 @@ const LABEL = { error: "ERROR", warn: "WARN ", info: "INFO " };
 
 export function renderHuman(findings, ruleMeta, meta) {
   const lines = [];
-  const tgt = meta.targets.length ? `targets: ${meta.targets.join(", ")}` : "no provider target";
-  lines.push(`mcplint  ${meta.file}  (${meta.toolCount} tools, ${tgt})`);
+  lines.push(`mcplint  ${meta.file}  ${meta.summary ?? ""}`.trimEnd());
   if (meta.missing?.length) lines.push(`  ! unknown target profile(s) ignored: ${meta.missing.join(", ")}`);
   lines.push("");
 

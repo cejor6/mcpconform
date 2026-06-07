@@ -54,6 +54,8 @@ Static *source* analysis — extracting tool decorators without running the serv
 
 ## Status
 
-Phase 0: spec + ruleset + provider profiles (this directory). Phase 1 (next): the CLI engine — ajv for the schema-shaped rules, custom rule fns for cross-file/semantic/provider checks, SARIF output, GitHub Action.
+Phase 1 done: CLI engine (`src/`) with ajv-backed schema rules + `--mode strict`, linting all three artifacts — **tool definitions**, **`server.json`**, and **client config** — auto-detected by shape (override with `--type`). Human + SARIF output. 20+ tests passing.
+
+Next: the introspection front-end (`mcplint inspect <command>` to pull `tools/list` from a live server in any language) and the SARIF GitHub Action.
 
 Spec baseline: **MCP 2025-11-25**.

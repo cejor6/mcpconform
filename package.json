@@ -9,7 +9,9 @@
   "scripts": {
     "test": "node --test",
     "lint:bad": "node src/index.mjs examples/tools.bad.json --target anthropic,openai",
-    "lint:good": "node src/index.mjs examples/tools.good.json --target anthropic,openai"
+    "lint:good": "node src/index.mjs examples/tools.good.json --target anthropic,openai",
+    "lint:server": "node src/index.mjs examples/server.bad.json",
+    "lint:client": "node src/index.mjs examples/client-config.bad.json"
   },
   "files": [
     "src",
