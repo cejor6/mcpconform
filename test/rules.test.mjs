@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runCoreRules, runProviderRules } from "../src/rules.mjs";
+import { validateInputSchema, checkProviderSchema } from "../src/schema.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
@@ -99,4 +100,35 @@ test("provider description-length fires past openai 1024", () => {
 
 test("clean tool passes anthropic + openai + gemini provider checks", () => {
   assert.deepEqual(provider([okTool], [profile("anthropic"), profile("openai"), profile("gemini")]), []);
+});
+
+function pschema(schema, id, mode = "default") {
+  const f = [];
+  checkProviderSchema("t", schema, profile(id), mode, (rid, tool, msg, pid) => f.push({ id: rid, pid }));
+  return f;
+}
+
+test("ajv: valid inputSchema passes, invalid type fails", () => {
+  assert.equal(validateInputSchema({ type: "object", properties: { a: { type: "string" } } }).ok, true);
+  assert.equal(validateInputSchema({ type: "object", properties: { a: { type: "frobnicate" } } }).ok, false);
+});
+
+test("gemini rejects anyOf (outside its OpenAPI subset)", () => {
+  const s = { type: "object", properties: { x: { anyOf: [{ type: "string" }, { type: "number" }] } } };
+  assert.ok(pschema(s, "gemini").some((x) => x.id === "provider/schema-unsupported-keyword"));
+});
+
+test("openai strict: object without additionalProperties:false flags", () => {
+  const s = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
+  assert.ok(pschema(s, "openai", "strict").some((x) => x.id === "provider/schema-additional-properties"));
+});
+
+test("openai strict: property missing from required flags", () => {
+  const s = { type: "object", properties: { a: { type: "string" }, b: { type: "string" } }, required: ["a"], additionalProperties: false };
+  assert.ok(pschema(s, "openai", "strict").some((x) => x.id === "provider/schema-all-required"));
+});
+
+test("clean object schema passes gemini subset", () => {
+  const s = { type: "object", properties: { location: { type: "string", description: "City" } }, required: ["location"] };
+  assert.deepEqual(pschema(s, "gemini"), []);
 });

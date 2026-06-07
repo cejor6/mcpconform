@@ -7,6 +7,8 @@
 // Each rule calls emit(ruleId, toolNameOrNull, message, profileIdOrNull).
 // Severity is resolved by the caller from rules.json + config overrides.
 
+import { checkProviderSchema } from "./schema.mjs";
+
 const MUTATING =
   /^(delete|remove|drop|destroy|cancel|purge|reset|revoke|send|place|create|update|set|write|edit|move|rename)[_-]/i;
 
@@ -63,7 +65,7 @@ export function runCoreRules(tools, emit) {
 }
 
 // --- provider (parameterized by profile) -----------------------------------
-export function runProviderRules(tools, profiles, emit) {
+export function runProviderRules(tools, profiles, emit, mode = "default") {
   for (const p of profiles) {
     const tn = p.toolName ?? {};
     const td = p.toolDescription ?? {};
@@ -78,6 +80,11 @@ export function runProviderRules(tools, profiles, emit) {
       if (td.maxLength && typeof t.description === "string" && t.description.length > td.maxLength)
         emit("provider/description-length", t.name,
           `description is ${t.description.length} chars; ${p.id} max is ${td.maxLength}`, p.id);
+    }
+
+    for (const t of tools) {
+      if (t && typeof t === "object" && t.inputSchema && typeof t.inputSchema === "object" && !Array.isArray(t.inputSchema))
+        checkProviderSchema(typeof t.name === "string" ? t.name : null, t.inputSchema, p, mode, emit);
     }
 
     if (p.tools && p.tools.maxCount && tools.length > p.tools.maxCount)

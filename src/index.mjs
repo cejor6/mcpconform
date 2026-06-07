@@ -8,6 +8,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { runCoreRules, runProviderRules } from "./rules.mjs";
+import { runSchemaValidity } from "./schema.mjs";
 import { renderHuman, renderSarif } from "./report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,8 +83,10 @@ function emit(id, tool, message, profile = null) {
   findings.push({ id, tier, tool: tool ?? null, message, profile });
 }
 
+const mode = args.mode || config.mode || "default";
 runCoreRules(tools, emit);
-if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit);
+runSchemaValidity(tools, emit);
+if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
 
 for (const p of activeProfiles)
   if (p.verified === false && findings.some((f) => f.profile === p.id))
