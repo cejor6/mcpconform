@@ -354,13 +354,6 @@
       "good": "\"pypi\""
     },
     {
-      "id": "server-json/registry-base-url",
-      "tier": "error",
-      "appliesTo": "server-json",
-      "source": "registry server.json schema (conditional)",
-      "message": "registryBaseUrl is required for npm/pypi/cargo/nuget package types."
-    },
-    {
       "id": "server-json/transport-type-enum",
       "tier": "error",
       "appliesTo": "server-json",

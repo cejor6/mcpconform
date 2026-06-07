@@ -169,6 +169,28 @@ test("server.json: root version mismatch vs sibling manifest", () => {
   assert.ok(ids.includes("server-json/version-matches-package"));
 });
 
+// regression: dogfooding kalshi-mcp-server surfaced two false positives
+test("server.json: registryBaseUrl optional; *_ID not treated as a secret", () => {
+  const ids = sj({
+    name: "io.github.you/srv",
+    version: "1.0.0",
+    packages: [
+      {
+        registryType: "pypi",
+        identifier: "srv",
+        version: "1.0.0",
+        transport: { type: "stdio" },
+        environmentVariables: [
+          { name: "FOO_API_KEY_ID", isSecret: false },
+          { name: "FOO_API_TOKEN", isSecret: false },
+        ],
+      },
+    ],
+  });
+  assert.ok(!ids.includes("server-json/registry-base-url"), "registryBaseUrl must be optional");
+  assert.equal(ids.filter((x) => x === "server-json/env-secret-flag").length, 1); // only FOO_API_TOKEN
+});
+
 // --- client config ---
 function cc(doc) {
   const f = [];
