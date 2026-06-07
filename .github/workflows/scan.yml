@@ -1,0 +1,27 @@
+# Demonstrates mcplint as a code-scanning step. Uses the action from this repo
+# (uses: ./). External consumers would use: uses: cejor6/mcplint@v1
+name: mcplint scan
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: mcplint
+        uses: ./
+        continue-on-error: true # demo fixtures are intentionally broken; don't fail the demo job
+        with:
+          files: examples/server.bad.json examples/client-config.bad.json examples/tools.bad.json
+          targets: anthropic,openai
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.mcplint.outputs.sarif }}
+          category: mcplint

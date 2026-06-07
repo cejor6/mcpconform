@@ -1,0 +1,41 @@
+name: mcplint
+description: Lint MCP tool definitions, server.json, and client config; emit SARIF for code scanning.
+branding:
+  icon: check-circle
+  color: blue
+inputs:
+  files:
+    description: Space- or newline-separated files to lint (tools/list dumps, server.json, client configs). Auto-detected by shape.
+    required: true
+  targets:
+    description: Comma-separated provider profiles to check against (e.g. "anthropic,openai"). Empty = MCP-spec checks only.
+    required: false
+    default: ""
+  mode:
+    description: "default | strict"
+    required: false
+    default: default
+  output:
+    description: SARIF output path.
+    required: false
+    default: mcplint.sarif
+outputs:
+  sarif:
+    description: Path to the generated SARIF file.
+    value: ${{ inputs.output }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install mcplint runtime deps
+      shell: bash
+      run: npm ci --omit=dev --prefix "$GITHUB_ACTION_PATH"
+    - name: Run mcplint
+      shell: bash
+      run: |
+        targets=""
+        if [ -n "${{ inputs.targets }}" ]; then targets="--target ${{ inputs.targets }}"; fi
+        node "$GITHUB_ACTION_PATH/src/index.mjs" ${{ inputs.files }} $targets \
+          --mode "${{ inputs.mode }}" --format sarif --out "${{ inputs.output }}"

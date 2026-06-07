@@ -5,7 +5,7 @@ const LABEL = { error: "ERROR", warn: "WARN ", info: "INFO " };
 
 export function renderHuman(findings, ruleMeta, meta) {
   const lines = [];
-  lines.push(`mcplint  ${meta.file}  ${meta.summary ?? ""}`.trimEnd());
+  for (const s of meta.summaries || []) lines.push(`mcplint  ${s}`);
   if (meta.missing?.length) lines.push(`  ! unknown target profile(s) ignored: ${meta.missing.join(", ")}`);
   lines.push("");
 
@@ -14,13 +14,18 @@ export function renderHuman(findings, ruleMeta, meta) {
     return lines.join("\n");
   }
 
+  const multi = new Set(findings.map((f) => f.file)).size > 1;
   const sorted = [...findings].sort(
-    (a, b) => ORDER[a.tier] - ORDER[b.tier] || a.id.localeCompare(b.id)
+    (a, b) =>
+      ORDER[a.tier] - ORDER[b.tier] ||
+      (a.file || "").localeCompare(b.file || "") ||
+      a.id.localeCompare(b.id)
   );
   for (const f of sorted) {
     const prof = f.profile ? ` <${f.profile}>` : "";
+    const ftag = multi && f.file ? ` ${f.file}` : "";
     const loc = f.tool ? ` [${f.tool}]` : "";
-    lines.push(`  ${LABEL[f.tier]} ${f.id}${prof}${loc}`);
+    lines.push(`  ${LABEL[f.tier]} ${f.id}${prof}${ftag}${loc}`);
     lines.push(`        ${f.message}`);
   }
 
@@ -60,7 +65,7 @@ export function renderSarif(findings, ruleMeta, meta) {
                 f.message,
             },
             locations: [
-              { physicalLocation: { artifactLocation: { uri: meta.file } } },
+              { physicalLocation: { artifactLocation: { uri: f.file ?? "input" } } },
             ],
           })),
         },

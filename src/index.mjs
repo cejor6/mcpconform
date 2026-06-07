@@ -4,7 +4,7 @@
 // MCP Tool objects against the core spec rules + targeted provider profiles.
 // (server.json / client-config linters and ajv-backed schema rules land next.)
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { runCoreRules, runProviderRules } from "./rules.mjs";
@@ -25,6 +25,7 @@ function parseArgs(argv) {
     else if (a === "--mode") out.mode = argv[++i];
     else if (a === "--portable") out.portable = true;
     else if (a === "--type") out.type = argv[++i];
+    else if (a === "--out") out.out = argv[++i];
     else if (a === "--config") out.config = argv[++i];
     else if (!a.startsWith("--")) out._.push(a);
   }
@@ -101,43 +102,62 @@ if (args.portable || config.portable)
 const missing = targetIds.filter((id) => !allProfiles[id]);
 const activeProfiles = targetIds.map((id) => allProfiles[id]).filter(Boolean);
 
-const findings = [];
 const severityFor = (id) => sevOverrides[id] || ruleMeta[id]?.tier || "warn";
-function emit(id, tool, message, profile = null) {
-  const tier = severityFor(id);
-  if (tier === "off") return;
-  findings.push({ id, tier, tool: tool ?? null, message, profile });
-}
-
-const artifactPath = resolve(args._[0]);
-const artifact = loadJSON(artifactPath);
-const type = args.type || detectType(artifact);
 const mode = args.mode || config.mode || "default";
-let summary = `[${type}]`;
 
-if (type === "tools") {
-  const tools = Array.isArray(artifact) ? artifact : artifact.tools || [];
-  runCoreRules(tools, emit);
-  runSchemaValidity(tools, emit);
-  if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
-  for (const p of activeProfiles)
-    if (p.verified === false && findings.some((f) => f.profile === p.id))
-      emit("meta/profile-unverified", null,
-        `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
-  const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
-  summary = `[tools]  (${tools.length} tools, ${tgt})`;
-} else if (type === "server-json") {
-  runServerJsonRules(artifact, emit, { packageVersion: siblingPackageVersion(artifactPath) });
-  summary = `[server.json]  (${(artifact.packages || []).length} package(s), ${(artifact.remotes || []).length} remote(s))`;
-} else if (type === "client-config") {
-  runClientConfigRules(artifact, emit);
-  const n = Object.keys(artifact.mcpServers || artifact.servers || {}).length;
-  summary = `[client-config]  (${n} server(s))`;
+function lintOne(fileArg) {
+  const findings = [];
+  const emit = (id, tool, message, profile = null) => {
+    const tier = severityFor(id);
+    if (tier === "off") return;
+    findings.push({ id, tier, tool: tool ?? null, message, profile, file: fileArg });
+  };
+
+  const apath = resolve(fileArg);
+  let artifact;
+  try {
+    artifact = loadJSON(apath);
+  } catch (e) {
+    findings.push({ id: "meta/parse-error", tier: "error", tool: null, message: `Cannot parse JSON: ${e.message}`, profile: null, file: fileArg });
+    return { findings, summary: `${fileArg}  [parse-error]` };
+  }
+
+  const type = args.type || detectType(artifact);
+  if (type === "tools") {
+    const tools = Array.isArray(artifact) ? artifact : artifact.tools || [];
+    runCoreRules(tools, emit);
+    runSchemaValidity(tools, emit);
+    if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
+    for (const p of activeProfiles)
+      if (p.verified === false && findings.some((f) => f.profile === p.id))
+        emit("meta/profile-unverified", null,
+          `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
+    const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
+    return { findings, summary: `${fileArg}  [tools]  (${tools.length} tools, ${tgt})` };
+  }
+  if (type === "server-json") {
+    runServerJsonRules(artifact, emit, { packageVersion: siblingPackageVersion(apath) });
+    return { findings, summary: `${fileArg}  [server.json]  (${(artifact.packages || []).length} package(s), ${(artifact.remotes || []).length} remote(s))` };
+  }
+  if (type === "client-config") {
+    runClientConfigRules(artifact, emit);
+    const n = Object.keys(artifact.mcpServers || artifact.servers || {}).length;
+    return { findings, summary: `${fileArg}  [client-config]  (${n} server(s))` };
+  }
+  return { findings, summary: `${fileArg}  [unknown]` };
 }
 
-const meta = { file: args._[0], summary, targets: targetIds, missing };
-console.log(
-  args.format === "sarif" ? renderSarif(findings, ruleMeta, meta) : renderHuman(findings, ruleMeta, meta)
-);
+const allFindings = [];
+const summaries = [];
+for (const fileArg of args._) {
+  const { findings, summary } = lintOne(fileArg);
+  allFindings.push(...findings);
+  summaries.push(summary);
+}
 
-process.exit(findings.some((f) => f.tier === "error") ? 1 : 0);
+const meta = { summaries, targets: targetIds, missing };
+const output = args.format === "sarif" ? renderSarif(allFindings, ruleMeta, meta) : renderHuman(allFindings, ruleMeta, meta);
+if (args.out) writeFileSync(resolve(args.out), output + "\n");
+else console.log(output);
+
+process.exit(allFindings.some((f) => f.tier === "error") ? 1 : 0);

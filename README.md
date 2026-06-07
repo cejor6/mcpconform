@@ -54,8 +54,12 @@ Static *source* analysis — extracting tool decorators without running the serv
 
 ## Status
 
-Phase 1 done: CLI engine (`src/`) with ajv-backed schema rules + `--mode strict`, linting all three artifacts — **tool definitions**, **`server.json`**, and **client config** — auto-detected by shape (override with `--type`). Human + SARIF output. 20+ tests passing.
+Phase 1 done: CLI engine (`src/`) with ajv-backed schema rules + `--mode strict`, linting all three artifacts — **tool definitions**, **`server.json`**, and **client config** — auto-detected by shape (override with `--type`). Lints multiple files at once; human + SARIF output (`--format sarif --out file.sarif`). Ships a composite **GitHub Action** (`action.yml`) + example workflow that uploads SARIF to the Security tab. 22 tests passing.
 
-Next: the introspection front-end (`mcplint inspect <command>` to pull `tools/list` from a live server in any language) and the SARIF GitHub Action.
+```sh
+node src/index.mjs path/to/server.json .mcp.json tools.json --target anthropic,openai
+```
+
+Next: the introspection front-end — `mcplint inspect <command>` to pull `tools/list` from a live server in any language (the last piece for linting servers you can't get a static dump from).
 
 Spec baseline: **MCP 2025-11-25**.
