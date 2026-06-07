@@ -12,7 +12,7 @@
     "lint:good": "node src/index.mjs examples/tools.good.json --target anthropic,openai",
     "lint:server": "node src/index.mjs examples/server.bad.json",
     "lint:client": "node src/index.mjs examples/client-config.bad.json",
-    "inspect:demo": "node src/index.mjs inspect --target anthropic -- node test/fixtures/mock-server.mjs"
+    "inspect:demo": "node src/index.mjs inspect --target anthropic -- node fixtures/mock-server.mjs"
   },
   "files": [
     "src",

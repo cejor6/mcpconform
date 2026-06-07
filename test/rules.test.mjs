@@ -8,6 +8,7 @@ import { validateInputSchema, checkProviderSchema } from "../src/schema.mjs";
 import { runServerJsonRules } from "../src/server-json.mjs";
 import { runClientConfigRules } from "../src/client-config.mjs";
 import { inspectStdio } from "../src/inspect.mjs";
+import { spawnSync } from "node:child_process";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
@@ -199,16 +200,78 @@ test("client-config: clean stdio + clean http pass", () => {
 
 // --- inspect (live MCP stdio handshake) ---
 test("inspect: handshake returns tools from a live stdio server", async () => {
-  const tools = await inspectStdio("node", [join(ROOT, "test/fixtures/mock-server.mjs")], { timeoutMs: 10000 });
+  const tools = await inspectStdio("node", [join(ROOT, "fixtures/mock-server.mjs")], { timeoutMs: 10000 });
   assert.equal(tools.length, 2);
   assert.equal(tools[0].name, "bad.tool");
   assert.equal(tools[1].name, "good_tool");
 });
 
 test("inspect: passes env vars through to the spawned server", async () => {
-  const tools = await inspectStdio("node", [join(ROOT, "test/fixtures/mock-server.mjs")], {
+  const tools = await inspectStdio("node", [join(ROOT, "fixtures/mock-server.mjs")], {
     env: { MCPLINT_TEST: "xyz" },
     timeoutMs: 10000,
   });
   assert.ok(tools.some((t) => t.name === "env_xyz"));
+});
+
+// --- newly implemented core rules ---
+test("core: output-schema/title/taskSupport/_meta/property-desc rules fire", () => {
+  const found = ids(
+    core([
+      {
+        name: "x",
+        title: "x",
+        description: "d",
+        inputSchema: { type: "object", properties: { a: { type: "string" } } },
+        outputSchema: { type: "array" },
+        execution: { taskSupport: "maybe" },
+        _meta: { foo: 1 },
+      },
+    ])
+  );
+  for (const id of [
+    "tool/output-schema-root-object",
+    "tool/title-redundant",
+    "tool/execution-tasksupport-enum",
+    "tool/meta-reserved-keys",
+    "tool/property-descriptions",
+  ])
+    assert.ok(found.includes(id), id);
+});
+
+test("core: annotations-consistency fires on readOnly+destructive", () => {
+  const found = ids(core([{ name: "y", description: "d", inputSchema: { type: "object" }, annotations: { readOnlyHint: true, destructiveHint: true } }]));
+  assert.ok(found.includes("tool/annotations-consistency"));
+});
+
+// --- CLI end-to-end (spawns the real binary) ---
+function cli(a) {
+  const r = spawnSync(process.execPath, [join(ROOT, "src/index.mjs"), ...a], { encoding: "utf8", cwd: ROOT });
+  return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+}
+
+test("cli: good fixture exits 0", () => {
+  assert.equal(cli(["examples/tools.good.json", "--target", "anthropic,openai"]).code, 0);
+});
+
+test("cli: bad fixture exits 1 and reports provider/name-pattern", () => {
+  const r = cli(["examples/tools.bad.json", "--target", "anthropic"]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /provider\/name-pattern/);
+});
+
+test("cli: server.json + client-config auto-detected and flagged", () => {
+  const r = cli(["examples/server.bad.json", "examples/client-config.bad.json"]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /server-json\//);
+  assert.match(r.out, /client-config\//);
+});
+
+test("cli: --help exits 0 with usage; --version prints semver", () => {
+  const h = cli(["--help"]);
+  assert.equal(h.code, 0);
+  assert.match(h.out, /USAGE/);
+  const v = cli(["--version"]);
+  assert.equal(v.code, 0);
+  assert.match(v.out.trim(), /^\d+\.\d+\.\d+/);
 });

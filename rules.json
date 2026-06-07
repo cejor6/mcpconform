@@ -100,6 +100,7 @@
     },
     {
       "id": "tool/output-schema-implies-structured",
+      "status": "planned",
       "tier": "info",
       "appliesTo": "tool",
       "source": "tools spec > Output Schema (server MUST return conforming structuredContent; runtime -> info)",
@@ -134,6 +135,7 @@
     },
     {
       "id": "tool/enum-for-closed-set",
+      "status": "planned",
       "tier": "info",
       "appliesTo": "tool",
       "source": "best practice",
@@ -240,6 +242,7 @@
     },
     {
       "id": "provider/total-size",
+      "status": "planned",
       "tier": "warn",
       "appliesTo": "tool-set",
       "family": "provider",
@@ -466,6 +469,7 @@
     },
     {
       "id": "client-config/env-refs-declared",
+      "status": "planned",
       "tier": "warn",
       "appliesTo": "client-config",
       "source": "client config convention",
@@ -480,6 +484,7 @@
     },
     {
       "id": "client-config/known-keys",
+      "status": "planned",
       "tier": "warn",
       "appliesTo": "client-config",
       "category": "per-client",
@@ -489,6 +494,7 @@
 
     {
       "id": "meta/spec-version",
+      "status": "planned",
       "tier": "info",
       "appliesTo": "meta",
       "source": "this catalog (pinned to mcp-2025-11-25)",
@@ -500,6 +506,13 @@
       "appliesTo": "meta",
       "source": "profile.verified flag",
       "message": "A finding relied on a profile with verified:false; its constraints are unconfirmed. Source the numbers from the consumer's docs before trusting it."
+    },
+    {
+      "id": "meta/parse-error",
+      "tier": "error",
+      "appliesTo": "meta",
+      "source": "engine",
+      "message": "The artifact could not be parsed as JSON."
     }
   ]
 }

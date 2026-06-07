@@ -61,6 +61,58 @@ export function runCoreRules(tools, emit) {
         emit("tool/destructive-needs-annotation", t.name,
           "Mutating-verb tool lacks annotations (destructiveHint defaults to TRUE).");
     }
+
+    // zero-parameter tool shape (info)
+    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && !s.properties && s.additionalProperties !== false)
+      emit("tool/no-params-shape", where, "Zero-parameter tool should set additionalProperties:false to accept only empty input.");
+
+    // outputSchema root must be object
+    const os = t.outputSchema;
+    if (os && typeof os === "object" && !Array.isArray(os) && os.type !== "object")
+      emit("tool/output-schema-root-object", where, `outputSchema root type must be "object" (got ${JSON.stringify(os.type)}).`);
+
+    // description length (info; clients truncate ~1024)
+    if (typeof t.description === "string" && t.description.length > 1024)
+      emit("tool/description-length", where, `description is ${t.description.length} chars; some clients truncate around 1024.`);
+
+    // every property should carry a description
+    if (s && typeof s === "object" && s.properties && typeof s.properties === "object") {
+      const missing = Object.keys(s.properties).filter((k) => {
+        const ps = s.properties[k];
+        return !ps || typeof ps !== "object" || !String(ps.description || "").trim();
+      });
+      if (missing.length) emit("tool/property-descriptions", where, `properties without a description: ${missing.join(", ")}`);
+    }
+
+    // annotation consistency
+    if (t.annotations && t.annotations.readOnlyHint === true && t.annotations.destructiveHint === true)
+      emit("tool/annotations-consistency", where, "destructiveHint is meaningful only when readOnlyHint is false.");
+
+    // redundant title
+    if (typeof t.title === "string" && t.title === t.name)
+      emit("tool/title-redundant", where, "title equals name; omit it or use a human-readable title.");
+
+    // execution.taskSupport enum
+    if (t.execution && t.execution.taskSupport !== undefined && !["forbidden", "optional", "required"].includes(t.execution.taskSupport))
+      emit("tool/execution-tasksupport-enum", where, `execution.taskSupport must be forbidden|optional|required (got ${JSON.stringify(t.execution.taskSupport)}).`);
+
+    // _meta reserved-key namespacing
+    if (t._meta && typeof t._meta === "object")
+      for (const k of Object.keys(t._meta)) {
+        const slash = k.indexOf("/");
+        if (slash < 0) emit("tool/meta-reserved-keys", where, `_meta key "${k}" should be reverse-DNS namespaced (e.g. com.acme/${k}).`);
+        else if (k.slice(0, slash) === "modelcontextprotocol.io")
+          emit("tool/meta-reserved-keys", where, `_meta namespace "modelcontextprotocol.io" is reserved (key "${k}").`);
+      }
+
+    // icon MIME support
+    if (Array.isArray(t.icons) && t.icons.length) {
+      const safe = t.icons.some(
+        (ic) => /image\/(png|jpe?g)/i.test((ic && ic.mimeType) || "") || /\.(png|jpe?g)(\?|$)/i.test((ic && ic.src) || "")
+      );
+      if (!safe)
+        emit("tool/icon-mime", where, "icons should include a png/jpeg (clients must support those); SVG/data: carry security caveats.");
+    }
   });
 }
 

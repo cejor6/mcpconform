@@ -1,5 +1,7 @@
 // Minimal MCP stdio server for testing `mcplint inspect`. Newline-delimited
 // JSON-RPC: answers initialize and tools/list; exposes one bad + one good tool.
+// NOTE: kept OUTSIDE test/ so `node --test` does not execute it as a test file
+// (it listens on stdin forever, which would hang the runner).
 let buf = "";
 const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
 
@@ -32,6 +34,5 @@ process.stdin.on("data", (c) => {
         tools.push({ name: `env_${process.env.MCPLINT_TEST}`, description: "env-derived", inputSchema: { type: "object" } });
       send({ jsonrpc: "2.0", id: msg.id, result: { tools } });
     }
-    // notifications (e.g. notifications/initialized) need no response
   }
 });

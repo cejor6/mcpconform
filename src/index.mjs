@@ -30,7 +30,10 @@ function parseArgs(argv) {
     else if (a === "--out") out.out = argv[++i];
     else if (a === "--env-file") out.envFile = argv[++i];
     else if (a === "--env") (out.envKv = out.envKv || []).push(argv[++i]);
+    else if (a === "--dump") out.dump = argv[++i];
     else if (a === "--config") out.config = argv[++i];
+    else if (a === "--help" || a === "-h") out.help = true;
+    else if (a === "--version" || a === "-v") out.version = true;
     else if (!a.startsWith("--")) out._.push(a);
   }
   return out;
@@ -92,18 +95,46 @@ function siblingPackageVersion(filePath) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-if (!args._.length) {
-  console.error(
-    "usage: mcplint <tools.json> [--target a,b] [--portable] [--mode strict] [--format human|sarif]"
-  );
-  process.exit(2);
+const pkg = loadJSON(join(ROOT, "package.json"));
+
+const HELP = `mcplint ${pkg.version} - static linter for MCP tool defs, server.json, and client config
+
+USAGE
+  mcplint <file...> [options]              lint files (type auto-detected by shape)
+  mcplint inspect [options] -- <cmd...>    start a live MCP server and lint its tools/list
+
+OPTIONS
+  --target <a,b>     provider profiles to check against (e.g. anthropic,openai); empty = MCP-spec only
+  --portable         check against every shipped provider profile
+  --mode <m>         default | strict (applies each profile's strict{} rules)
+  --type <t>         force artifact type: tools | server-json | client-config
+  --format <f>       human (default) | sarif
+  --out <file>       write the report to a file instead of stdout
+  --config <file>    config file (default: ./mcplint.config.json)
+  --env-file <.env>  (inspect) load env vars for the spawned server
+  --env KEY=VAL      (inspect) set an env var for the spawned server (repeatable)
+  --dump <file>      (inspect) also write the captured tools/list to a file
+  -h, --help         show this help
+  -v, --version      print version
+
+EXAMPLES
+  mcplint server.json .mcp.json
+  mcplint tools.json --target anthropic,openai
+  mcplint inspect --env-file .env -- python server.py`;
+
+if (args.version) {
+  console.log(pkg.version);
+  process.exit(0);
+}
+if (args.help || (!args._.length && !args.rest.length)) {
+  console.log(HELP);
+  process.exit(args.help ? 0 : 2);
 }
 
 const ruleMeta = Object.fromEntries(loadJSON(join(ROOT, "rules.json")).rules.map((r) => [r.id, r]));
-const allProfiles = loadProfiles(join(ROOT, "profiles"));
 
 let config = {};
-const cfgPath = args.config ? resolve(args.config) : join(ROOT, "mcplint.config.json");
+const cfgPath = args.config ? resolve(args.config) : join(process.cwd(), "mcplint.config.json");
 if (existsSync(cfgPath)) {
   try {
     config = loadJSON(cfgPath);
@@ -112,6 +143,12 @@ if (existsSync(cfgPath)) {
   }
 }
 const sevOverrides = config.rules || {};
+
+const allProfiles = loadProfiles(join(ROOT, "profiles"));
+if (config.profilesDir) {
+  const dir = resolve(dirname(cfgPath), config.profilesDir);
+  if (existsSync(dir)) Object.assign(allProfiles, loadProfiles(dir));
+}
 
 let targetIds = args.target.length ? args.target : config.targets || [];
 if (args.portable || config.portable)
@@ -147,6 +184,7 @@ if (args._[0] === "inspect") {
     );
     process.exit(2);
   }
+  if (args.dump) writeFileSync(resolve(args.dump), JSON.stringify({ tools }, null, 2) + "\n");
   const label = `inspect:${cmd.join(" ")}`;
   const findings = [];
   const emit = (id, tool, message, profile = null) => {
