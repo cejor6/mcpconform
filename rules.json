@@ -183,10 +183,17 @@
       "id": "tool/meta-reserved-keys",
       "tier": "warn",
       "appliesTo": "tool",
-      "source": "spec _meta rules (reverse-DNS; modelcontextprotocol.io reserved)",
-      "message": "_meta keys must be reverse-DNS namespaced; the modelcontextprotocol.io namespace is reserved.",
+      "source": "spec _meta rules (modelcontextprotocol.io namespace is reserved)",
+      "message": "_meta uses the reserved modelcontextprotocol.io namespace.",
       "bad": "_meta: { \"foo\": 1 }",
       "good": "_meta: { \"com.acme/foo\": 1 }"
+    },
+    {
+      "id": "tool/meta-namespacing",
+      "tier": "info",
+      "appliesTo": "tool",
+      "source": "spec _meta rules (SHOULD be reverse-DNS namespaced)",
+      "message": "_meta key is not reverse-DNS namespaced (often framework-injected, e.g. fastmcp)."
     },
     {
       "id": "tool/icon-mime",

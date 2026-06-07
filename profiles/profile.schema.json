@@ -63,7 +63,12 @@
         "unenforcedKeywords": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Keywords accepted but silently ignored (won't constrain model output) — flagged at info by default, promoted to error when a strict mode rejects them."
+          "description": "Constraint keywords accepted but not applied (won't constrain model output) — flagged at info by default, promoted to error when a strict mode rejects them."
+        },
+        "ignoredKeywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keywords the consumer silently drops with no error (e.g. additionalProperties/default on Gemini). Flagged at info, never error — distinguishes 'harmlessly ignored' from 'rejected'."
         },
         "supportedStringFormats": { "type": "array", "items": { "type": "string" } },
         "allowsRefs": { "type": "boolean" },

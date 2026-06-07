@@ -13,6 +13,7 @@
     "dialect": "openapi-3.0",
     "rootMustBeObject": true,
     "supportedKeywords": ["type", "nullable", "required", "format", "description", "properties", "items", "enum", "minimum", "maximum"],
+    "ignoredKeywords": ["additionalProperties", "default", "title", "examples"],
     "allowsRefs": false,
     "allowsRecursion": false,
     "allowsAnyOf": false,

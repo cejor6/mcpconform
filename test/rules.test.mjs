@@ -122,6 +122,21 @@ test("gemini rejects anyOf (outside its OpenAPI subset)", () => {
   assert.ok(pschema(s, "gemini").some((x) => x.id === "provider/schema-unsupported-keyword"));
 });
 
+test("gemini: anyOf errors exactly once (no schema-no-refs dup); additionalProperties/default are info", () => {
+  const s = {
+    type: "object",
+    additionalProperties: false,
+    properties: { x: { anyOf: [{ type: "string" }, { type: "number" }], default: "a" } },
+  };
+  const f = [];
+  checkProviderSchema("t", s, profile("gemini"), "default", (rid, tool, msg) => f.push({ id: rid, msg }));
+  const anyofErr = f.filter((x) => x.id === "provider/schema-unsupported-keyword" && /anyOf/.test(x.msg));
+  assert.equal(anyofErr.length, 1); // not double-reported
+  assert.ok(!f.some((x) => x.id === "provider/schema-no-refs")); // dedup: no second anyOf finding
+  assert.ok(f.some((x) => x.id === "provider/schema-unenforced-keyword" && /additionalProperties/.test(x.msg)));
+  assert.ok(f.some((x) => x.id === "provider/schema-unenforced-keyword" && /default/.test(x.msg)));
+});
+
 test("openai strict: object without additionalProperties:false flags", () => {
   const s = { type: "object", properties: { a: { type: "string" } }, required: ["a"] };
   assert.ok(pschema(s, "openai", "strict").some((x) => x.id === "provider/schema-additional-properties"));
@@ -255,7 +270,7 @@ test("core: output-schema/title/taskSupport/_meta/property-desc rules fire", () 
     "tool/output-schema-root-object",
     "tool/title-redundant",
     "tool/execution-tasksupport-enum",
-    "tool/meta-reserved-keys",
+    "tool/meta-namespacing",
     "tool/property-descriptions",
   ])
     assert.ok(found.includes(id), id);

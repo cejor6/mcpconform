@@ -100,7 +100,8 @@ export function runCoreRules(tools, emit) {
     if (t._meta && typeof t._meta === "object")
       for (const k of Object.keys(t._meta)) {
         const slash = k.indexOf("/");
-        if (slash < 0) emit("tool/meta-reserved-keys", where, `_meta key "${k}" should be reverse-DNS namespaced (e.g. com.acme/${k}).`);
+        if (slash < 0)
+          emit("tool/meta-namespacing", where, `_meta key "${k}" is not reverse-DNS namespaced (e.g. com.acme/${k}); often framework-injected.`);
         else if (k.slice(0, slash) === "modelcontextprotocol.io")
           emit("tool/meta-reserved-keys", where, `_meta namespace "modelcontextprotocol.io" is reserved (key "${k}").`);
       }

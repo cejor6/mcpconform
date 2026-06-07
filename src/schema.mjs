@@ -76,29 +76,37 @@ export function checkProviderSchema(toolName, schema, profile, mode, emit) {
   const keywords = new Set();
   for (const { schema: s } of subs) for (const k of Object.keys(s)) keywords.add(k);
 
-  // unsupported (denylist) or not-in-allowlist keywords
+  // One verdict per keyword (deduplicated):
+  //   - hard-unsupported (denylist, or an allowlist miss that isn't merely cosmetic) -> error
+  //   - accepted-but-no-effect (declared ignored, or an unenforced constraint)        -> info
+  //     (promoted to error only under a strict mode that rejects unenforced keywords)
+  const supported = is.supportedKeywords ? new Set(is.supportedKeywords) : null;
+  const denied = new Set(is.unsupportedKeywords || []);
+  const ignored = new Set(is.ignoredKeywords || []);
+  const unenforced = new Set(is.unenforcedKeywords || []);
+
   for (const kw of keywords) {
     if (META_OK.has(kw)) continue;
-    const denied = is.unsupportedKeywords && is.unsupportedKeywords.includes(kw);
-    const notAllowed = is.supportedKeywords && !is.supportedKeywords.includes(kw);
-    if (denied || notAllowed)
+    const allowlistMiss = !!supported && !supported.has(kw);
+    const cosmetic = ignored.has(kw) || unenforced.has(kw);
+
+    if (denied.has(kw) || (allowlistMiss && !cosmetic)) {
       emit("provider/schema-unsupported-keyword", toolName, `inputSchema uses "${kw}" which ${pid} does not support`, pid);
+    } else if (cosmetic) {
+      if (strict && sp.rejectsUnenforcedKeywords && unenforced.has(kw))
+        emit("provider/schema-unsupported-keyword", toolName, `inputSchema uses "${kw}" which ${pid} rejects in strict mode`, pid);
+      else emit("provider/schema-unenforced-keyword", toolName, `"${kw}" is accepted but has no effect on ${pid}`, pid);
+    }
   }
 
-  // unenforced keywords: info by default; error under strict if the profile rejects them
-  if (is.unenforcedKeywords)
-    for (const kw of keywords) {
-      if (!is.unenforcedKeywords.includes(kw)) continue;
-      if (strict && sp.rejectsUnenforcedKeywords)
-        emit("provider/schema-unsupported-keyword", toolName, `inputSchema uses "${kw}" which ${pid} rejects in strict mode`, pid);
-      else emit("provider/schema-unenforced-keyword", toolName, `"${kw}" is accepted but not enforced by ${pid}`, pid);
-    }
-
-  // $ref / anyOf when the profile forbids them
-  if (is.allowsRefs === false && keywords.has("$ref"))
-    emit("provider/schema-no-refs", toolName, `${pid} does not support $ref; inline the definition`, pid);
-  if (is.allowsAnyOf === false && keywords.has("anyOf"))
-    emit("provider/schema-no-refs", toolName, `${pid} does not support anyOf`, pid);
+  // Structural forbids ($ref/anyOf) — only for profiles WITHOUT an allowlist.
+  // With an allowlist the keyword loop already covers these; running both double-reports.
+  if (!supported) {
+    if (is.allowsRefs === false && keywords.has("$ref"))
+      emit("provider/schema-no-refs", toolName, `${pid} does not support $ref; inline the definition`, pid);
+    if (is.allowsAnyOf === false && keywords.has("anyOf"))
+      emit("provider/schema-no-refs", toolName, `${pid} does not support anyOf`, pid);
+  }
 
   // strict-mode structural requirements
   if (strict) {
