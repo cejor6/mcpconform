@@ -1,6 +1,6 @@
-# Demonstrates mcplint as a code-scanning step. Uses the action from this repo
-# (uses: ./). External consumers would use: uses: cejor6/mcplint@v1
-name: mcplint scan
+# Demonstrates mcpconform as a code-scanning step. Uses the action from this repo
+# (uses: ./). External consumers would use: uses: cejor6/mcpconform@v1
+name: mcpconform scan
 on:
   push:
     branches: [main]
@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - id: mcplint
+      - id: mcpconform
         uses: ./
         continue-on-error: true # demo fixtures are intentionally broken; don't fail the demo job
         with:
@@ -23,5 +23,5 @@ jobs:
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: ${{ steps.mcplint.outputs.sarif }}
-          category: mcplint
+          sarif_file: ${{ steps.mcpconform.outputs.sarif }}
+          category: mcpconform

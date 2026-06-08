@@ -1,4 +1,4 @@
-# mcplint *(working name — pending availability check)*
+# mcpconform
 
 A static linter for **MCP setup correctness**: tool definitions, the `server.json` registry manifest, and client config files (`.mcp.json` / `claude_desktop_config.json` / `mcpServers`). Think `shellcheck`/`hadolint`, but for Model Context Protocol — and **provider-agnostic by design**.
 
@@ -36,21 +36,21 @@ A name like `admin.tools.list` is **legal per the MCP spec** (dots allowed, up t
 
 ## Language-agnostic: lints the wire, not the source
 
-mcplint never parses your server's source code, so it does not care whether the server is Python, Node, Go, Rust, or a compiled binary. MCP is a *wire protocol* — a Python server and a Node server emit byte-identical `tools/list` JSON — so the linter validates that protocol surface, not the implementation. (Same root decision as provider-agnostic: operate on the protocol surface, not the internals.)
+mcpconform never parses your server's source code, so it does not care whether the server is Python, Node, Go, Rust, or a compiled binary. MCP is a *wire protocol* — a Python server and a Node server emit byte-identical `tools/list` JSON — so the linter validates that protocol surface, not the implementation. (Same root decision as provider-agnostic: operate on the protocol surface, not the internals.)
 
 Two ways to feed it tool definitions:
 
 - **Static (no execution, CI-safe):** lint JSON files directly — `server.json`, client configs, or a captured `tools/list` dump committed to the repo. Zero runtime, offline, deterministic. The default for manifests and configs.
 - **Introspection (any language):** launch or connect to the server and call `tools/list` over stdio/HTTP — exactly what a client does. The launch command (`command` + `args`) comes from the config, so `python server.py`, `node server.js`, `uvx foo`, `npx bar`, a binary, or a Docker image are all handled by one generic path.
 
-Static *source* analysis — extracting tool decorators without running the server — is a deliberate **non-goal**: it would need a parser per framework (FastMCP, the TS SDK, mcp-go, ...) and re-break on every framework change. Linting the wire keeps mcplint both language- *and* framework-agnostic.
+Static *source* analysis — extracting tool decorators without running the server — is a deliberate **non-goal**: it would need a parser per framework (FastMCP, the TS SDK, mcp-go, ...) and re-break on every framework change. Linting the wire keeps mcpconform both language- *and* framework-agnostic.
 
 ## Files
 
 - `profiles/profile.schema.json` — the meta-schema every profile validates against.
 - `profiles/*.json` — one consumer per file.
 - `rules.json` — the full rule catalog (id, tier, source citation, bad/good). Three tiers: `error` (spec MUST / 400), `warn` (spec SHOULD), `info` (opinionated; AI-judged rules land here later).
-- `mcplint.config.example.json` — targeting + per-rule severity overrides.
+- `mcpconform.config.example.json` — targeting + per-rule severity overrides.
 
 ## Status
 
@@ -60,13 +60,13 @@ Phase 1 done: CLI engine (`src/`) with ajv-backed schema rules + `--mode strict`
 node src/index.mjs path/to/server.json .mcp.json tools.json --target anthropic,openai
 ```
 
-Also includes `mcplint inspect -- <command>` — pulls `tools/list` from a live server in any language via the MCP stdio handshake, then lints it (for servers you can't get a static dump from):
+Also includes `mcpconform inspect -- <command>` — pulls `tools/list` from a live server in any language via the MCP stdio handshake, then lints it (for servers you can't get a static dump from):
 
 ```sh
 node src/index.mjs inspect --target anthropic,openai -- python server.py
 ```
 
-Servers that need env vars to start (API keys, etc.) inherit your shell env, or pass `--env-file .env` / `--env KEY=VAL`. Tool listing rarely makes network calls, so **placeholder values are usually enough** to get the tool surface. In CI, prefer linting a committed `tools/list` dump or `server.json` so no secrets are needed at all — capture a reusable dump once with `mcplint inspect --dump tools.json -- <cmd>`.
+Servers that need env vars to start (API keys, etc.) inherit your shell env, or pass `--env-file .env` / `--env KEY=VAL`. Tool listing rarely makes network calls, so **placeholder values are usually enough** to get the tool surface. In CI, prefer linting a committed `tools/list` dump or `server.json` so no secrets are needed at all — capture a reusable dump once with `mcpconform inspect --dump tools.json -- <cmd>`.
 
 Remaining before a 1.0 release: publish to npm / PyPI (when the maintainer gives the go).
 

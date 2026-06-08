@@ -1,4 +1,4 @@
-// Rule implementations for mcplint.
+// Rule implementations for mcpconform.
 //
 // Core rules are provider-agnostic (pure MCP-spec / JSON-Schema correctness).
 // provider/* rules are a single PARAMETERIZED family: they read whatever

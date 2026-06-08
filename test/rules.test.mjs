@@ -245,7 +245,7 @@ test("inspect: handshake returns tools from a live stdio server", async () => {
 
 test("inspect: passes env vars through to the spawned server", async () => {
   const tools = await inspectStdio("node", [join(ROOT, "fixtures/mock-server.mjs")], {
-    env: { MCPLINT_TEST: "xyz" },
+    env: { MCPCONFORM_TEST: "xyz" },
     timeoutMs: 10000,
   });
   assert.ok(tools.some((t) => t.name === "env_xyz"));

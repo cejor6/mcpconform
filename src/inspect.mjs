@@ -93,7 +93,7 @@ export function inspectStdio(command, args = [], { timeoutMs = 20000, env } = {}
     initId = request("initialize", {
       protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: "mcplint", version: "0.1.0" },
+      clientInfo: { name: "mcpconform", version: "0.1.0" },
     });
   });
 }
