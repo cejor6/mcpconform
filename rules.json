@@ -249,13 +249,14 @@
     },
     {
       "id": "provider/total-size",
-      "status": "planned",
       "tier": "warn",
       "appliesTo": "tool-set",
       "family": "provider",
       "reads": "tools.maxTotalBytes",
       "source": "active profile(s)",
-      "message": "Serialized tool set exceeds the targeted consumer's size budget."
+      "message": "Serialized tool set exceeds the targeted consumer's size budget.",
+      "bad": "tool set serializes to 600 KB vs a 256 KB budget",
+      "good": "trim descriptions or split across servers (inert unless a profile sets maxTotalBytes)"
     },
     {
       "id": "provider/schema-unsupported-keyword",
@@ -469,11 +470,12 @@
     },
     {
       "id": "client-config/env-refs-declared",
-      "status": "planned",
       "tier": "warn",
       "appliesTo": "client-config",
       "source": "client config convention",
-      "message": "${VAR} references should be resolvable/declared."
+      "message": "Malformed ${...} interpolation (empty, unterminated, or invalid variable name). Well-formed refs may resolve from the host env, which can't be checked statically.",
+      "bad": "\"args\": [\"--key=${API_KEY\"]",
+      "good": "\"args\": [\"--key=${API_KEY}\"]"
     },
     {
       "id": "client-config/url-https",
@@ -484,12 +486,12 @@
     },
     {
       "id": "client-config/known-keys",
-      "status": "planned",
       "tier": "warn",
       "appliesTo": "client-config",
-      "category": "per-client",
-      "source": "per-client config schema",
-      "message": "Unknown or deprecated key for the detected client."
+      "source": "union of per-client config schemas",
+      "message": "Unknown server-entry key — almost always a typo (checked against the union of keys the major clients accept; top-level app keys are not checked).",
+      "bad": "\"arg\": [\"server.py\"]  (typo for args)",
+      "good": "\"args\": [\"server.py\"]"
     },
 
     {

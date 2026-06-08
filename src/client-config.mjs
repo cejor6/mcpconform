@@ -13,6 +13,25 @@ const SECRET = [
 ];
 const looksSecret = (v) => typeof v === "string" && SECRET.some((re) => re.test(v));
 
+// Union of server-entry keys recognized across the major clients (Claude
+// Desktop, Claude Code .mcp.json, VS Code, Cursor, Cline/Roo). Keys outside
+// this set in a server entry are almost always typos (`arg`, `enviroment`).
+// We only check inside server entries — never top-level, since a file like
+// claude_desktop_config.json carries unrelated app keys at the root.
+const KNOWN_SERVER_KEYS = new Set([
+  "command", "args", "env", "envFile", "cwd", // stdio
+  "type", "url", "headers", // remote (http/sse)
+  "timeout", "disabled", "autoApprove", "alwaysAllow", "transportType", // client extras
+  "inputs", // Claude Code / VS Code: promptString variable declarations
+]);
+
+// True when a string carries a malformed ${...} interpolation: an unterminated
+// `${`, an empty `${}`, or an invalid variable name. Well-formed `${NAME}` and
+// `${NAME:-default}` are left alone (they may resolve from the host env, which
+// we can't see statically).
+const VAR_REF = /\$\{[A-Za-z_][A-Za-z0-9_]*(?::[-+?][^}]*)?\}/g;
+const hasMalformedRef = (v) => typeof v === "string" && v.replace(VAR_REF, "").includes("${");
+
 export function runClientConfigRules(doc, emit) {
   const servers = (doc && (doc.mcpServers || doc.servers)) || null;
   if (!servers || typeof servers !== "object") {
@@ -40,6 +59,20 @@ export function runClientConfigRules(doc, emit) {
 
     if (cfg.args !== undefined && (!Array.isArray(cfg.args) || cfg.args.some((a) => typeof a !== "string")))
       emit("client-config/args-array", name, "`args` must be an array of strings.");
+
+    for (const key of Object.keys(cfg))
+      if (!KNOWN_SERVER_KEYS.has(key))
+        emit("client-config/known-keys", `${name}.${key}`, `unknown server-entry key "${key}" — typo? (recognized: ${[...KNOWN_SERVER_KEYS].join(", ")})`);
+
+    const refFields = [];
+    if (typeof cfg.command === "string") refFields.push(["command", cfg.command]);
+    if (typeof cfg.url === "string") refFields.push(["url", cfg.url]);
+    if (Array.isArray(cfg.args)) cfg.args.forEach((a, i) => { if (typeof a === "string") refFields.push([`args[${i}]`, a]); });
+    if (cfg.env && typeof cfg.env === "object") for (const [k, v] of Object.entries(cfg.env)) refFields.push([`env.${k}`, v]);
+    if (cfg.headers && typeof cfg.headers === "object") for (const [k, v] of Object.entries(cfg.headers)) refFields.push([`headers.${k}`, v]);
+    for (const [label, val] of refFields)
+      if (hasMalformedRef(val))
+        emit("client-config/env-refs-declared", `${name}.${label}`, "malformed ${...} variable interpolation (empty, unterminated, or invalid name).");
 
     if (cfg.env && typeof cfg.env === "object")
       for (const [k, v] of Object.entries(cfg.env)) {

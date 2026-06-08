@@ -6,6 +6,11 @@
       "command": "node",
       "args": ["server.js"],
       "env": { "API_KEY": "sk-live-abcdefghij1234567890", "PORT": 3000 }
+    },
+    "typo": {
+      "command": "uvx",
+      "arg": ["my-server"],
+      "env": { "TOKEN": "${API_TOKEN" }
     }
   }
 }
