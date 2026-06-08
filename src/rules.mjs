@@ -144,6 +144,8 @@ export function runProviderRules(tools, profiles, emit, mode = "default") {
       emit("provider/tool-count", null, `${tools.length} tools exceed ${p.id} max of ${p.tools.maxCount}`, p.id);
 
     if (p.tools && p.tools.maxTotalBytes) {
+      // Proxy for the serialized tool set the consumer receives. Measures the
+      // normalized in-memory tool objects, not the exact tools/list wire bytes.
       const bytes = Buffer.byteLength(JSON.stringify(tools), "utf8");
       if (bytes > p.tools.maxTotalBytes)
         emit("provider/total-size", null,

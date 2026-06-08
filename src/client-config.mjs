@@ -22,6 +22,7 @@ const KNOWN_SERVER_KEYS = new Set([
   "command", "args", "env", "envFile", "cwd", // stdio
   "type", "url", "headers", // remote (http/sse)
   "timeout", "disabled", "autoApprove", "alwaysAllow", "transportType", // client extras
+  "inputs", // Claude Code / VS Code: promptString variable declarations
 ]);
 
 // True when a string carries a malformed ${...} interpolation: an unterminated
@@ -63,11 +64,15 @@ export function runClientConfigRules(doc, emit) {
       if (!KNOWN_SERVER_KEYS.has(key))
         emit("client-config/known-keys", `${name}.${key}`, `unknown server-entry key "${key}" — typo? (recognized: ${[...KNOWN_SERVER_KEYS].join(", ")})`);
 
-    const refStrings = [cfg.command, cfg.url, ...(Array.isArray(cfg.args) ? cfg.args : [])]
-      .concat(cfg.env && typeof cfg.env === "object" ? Object.values(cfg.env) : [])
-      .concat(cfg.headers && typeof cfg.headers === "object" ? Object.values(cfg.headers) : []);
-    if (refStrings.some(hasMalformedRef))
-      emit("client-config/env-refs-declared", name, "malformed ${...} variable interpolation (empty, unterminated, or invalid name).");
+    const refFields = [];
+    if (typeof cfg.command === "string") refFields.push(["command", cfg.command]);
+    if (typeof cfg.url === "string") refFields.push(["url", cfg.url]);
+    if (Array.isArray(cfg.args)) cfg.args.forEach((a, i) => { if (typeof a === "string") refFields.push([`args[${i}]`, a]); });
+    if (cfg.env && typeof cfg.env === "object") for (const [k, v] of Object.entries(cfg.env)) refFields.push([`env.${k}`, v]);
+    if (cfg.headers && typeof cfg.headers === "object") for (const [k, v] of Object.entries(cfg.headers)) refFields.push([`headers.${k}`, v]);
+    for (const [label, val] of refFields)
+      if (hasMalformedRef(val))
+        emit("client-config/env-refs-declared", `${name}.${label}`, "malformed ${...} variable interpolation (empty, unterminated, or invalid name).");
 
     if (cfg.env && typeof cfg.env === "object")
       for (const [k, v] of Object.entries(cfg.env)) {

@@ -255,6 +255,16 @@ test("client-config: well-formed ${VAR} and ${VAR:-default} not flagged", () => 
   assert.ok(!ids.includes("client-config/env-refs-declared"));
 });
 
+test("client-config: malformed ref in an env value is flagged", () => {
+  const ids = cc({ mcpServers: { x: { command: "node", args: ["s.js"], env: { TOKEN: "${API_TOKEN" } } } });
+  assert.ok(ids.includes("client-config/env-refs-declared"));
+});
+
+test("client-config: inputs key (Claude Code / VS Code) not flagged as unknown", () => {
+  const ids = cc({ mcpServers: { x: { command: "npx", args: ["s"], inputs: [{ type: "promptString", id: "k" }] } } });
+  assert.ok(!ids.includes("client-config/known-keys"));
+});
+
 test("provider: total-size fires when serialized set exceeds maxTotalBytes", () => {
   const f = provider([okTool], [{ id: "tiny", tools: { maxTotalBytes: 50 } }]);
   assert.ok(ids(f).includes("provider/total-size"));
