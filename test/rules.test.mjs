@@ -235,6 +235,36 @@ test("client-config: clean stdio + clean http pass", () => {
   assert.deepEqual(ids, []);
 });
 
+test("client-config: unknown server-entry key -> known-keys", () => {
+  const ids = cc({ mcpServers: { x: { command: "node", arg: ["s.js"] } } });
+  assert.ok(ids.includes("client-config/known-keys"));
+});
+
+test("client-config: known keys (envFile, timeout, disabled) not flagged", () => {
+  const ids = cc({ mcpServers: { x: { command: "node", args: ["s.js"], envFile: ".env", timeout: "30", disabled: "false" } } });
+  assert.ok(!ids.includes("client-config/known-keys"));
+});
+
+test("client-config: malformed ${...} -> env-refs-declared", () => {
+  const ids = cc({ mcpServers: { x: { command: "node", args: ["--key=${API_KEY"] } } });
+  assert.ok(ids.includes("client-config/env-refs-declared"));
+});
+
+test("client-config: well-formed ${VAR} and ${VAR:-default} not flagged", () => {
+  const ids = cc({ mcpServers: { x: { command: "node", args: ["--k=${API_KEY}", "--p=${PORT:-3000}"], env: { T: "${T}" } } } });
+  assert.ok(!ids.includes("client-config/env-refs-declared"));
+});
+
+test("provider: total-size fires when serialized set exceeds maxTotalBytes", () => {
+  const f = provider([okTool], [{ id: "tiny", tools: { maxTotalBytes: 50 } }]);
+  assert.ok(ids(f).includes("provider/total-size"));
+});
+
+test("provider: total-size dormant when profile budget is null", () => {
+  const f = provider([okTool], [profile("anthropic")]);
+  assert.ok(!ids(f).includes("provider/total-size"));
+});
+
 // --- inspect (live MCP stdio handshake) ---
 test("inspect: handshake returns tools from a live stdio server", async () => {
   const tools = await inspectStdio("node", [join(ROOT, "fixtures/mock-server.mjs")], { timeoutMs: 10000 });
