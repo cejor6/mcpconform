@@ -1,21 +1,78 @@
 # mcpconform
 
-A static linter for **MCP setup correctness**: tool definitions, the `server.json` registry manifest, and client config files (`.mcp.json` / `claude_desktop_config.json` / `mcpServers`). Think `shellcheck`/`hadolint`, but for Model Context Protocol — and **provider-agnostic by design**.
+A static linter for **MCP setup correctness**: tool definitions, the `server.json` registry manifest, and client config files (`.mcp.json` / `claude_desktop_config.json` / `mcpServers`). Think `shellcheck`/`hadolint`, but for the Model Context Protocol — and **provider-agnostic by design**.
 
-It is *not* a security scanner (that lane is crowded) and *not* a live conformance tester (mcpjam owns that). It checks, statically and offline, that your MCP setup is **correct and portable**.
+It checks, statically and offline, that your MCP setup is **correct and portable**. It is intentionally *not* a security scanner and *not* a live conformance tester — it validates the shape and portability of your tool surface, the part nothing else checks.
+
+Spec baseline: **MCP 2025-11-25**.
+
+## Install
+
+```sh
+# one-off, no install
+npx mcpconform path/to/server.json .mcp.json tools.json --target anthropic,openai
+
+# or install the CLI
+npm install -g mcpconform
+mcpconform tools.json --target anthropic,openai
+```
+
+Requires Node ≥ 20.
+
+## Usage
+
+Point it at any MCP artifact — tool-definition dumps, `server.json`, or client config. The type is auto-detected by shape (override with `--type`), and you can pass several at once:
+
+```sh
+mcpconform server.json .mcp.json tools.json --target anthropic,openai
+```
+
+- `--target a,b` — provider profiles to check against. Empty = pure MCP-spec checks.
+- `--portable` — must satisfy the strictest common denominator of every major provider.
+- `--mode strict` — also apply each provider's strict-mode constraints.
+- `--format sarif --out file.sarif` — emit SARIF for GitHub code scanning.
+
+### Lint a live server (any language)
+
+When you can't get a static dump, `inspect` launches or connects to the server and pulls `tools/list` over the MCP stdio handshake — exactly what a client does — then lints it:
+
+```sh
+mcpconform inspect --target anthropic,openai -- python server.py
+```
+
+Servers that need env vars to start inherit your shell env, or pass `--env-file .env` / `--env KEY=VAL`. Tool listing rarely makes network calls, so **placeholder values are usually enough**. To avoid secrets in CI, capture a reusable dump once and commit it:
+
+```sh
+mcpconform inspect --dump tools.json -- <cmd>
+```
+
+### GitHub Action
+
+Lint on every push and upload findings to the Security tab as SARIF:
+
+```yaml
+- uses: cejor6/mcpconform@v1
+  id: mcpconform
+  with:
+    files: server.json .mcp.json
+    targets: anthropic,openai
+- uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: ${{ steps.mcpconform.outputs.sarif }}
+```
 
 ## Provider-agnostic architecture
 
 The engine knows nothing about any specific LLM vendor. Every *consumer* of a tool definition — an LLM tool-use API **or** an MCP host — is described by a declarative **profile** (`profiles/*.json`, validated by `profiles/profile.schema.json`).
 
 - **Core rules** (`tool/*`, `server-json/*`, `client-config/*`) are pure MCP-spec / JSON-Schema / registry correctness. They name no vendor and run by default.
-- **`provider/*` rules** are a single *parameterized* family. They read whatever profile(s) `config.targets` declares and report which profile a finding violated. Adding a new provider is a **data** change (drop a JSON file), never a code change.
+- **`provider/*` rules** are a single *parameterized* family. They read whatever profile(s) you target and report which profile a finding violated. Adding a new provider is a **data** change (drop a JSON file), never a code change.
 
 ```
-targets: []                          -> pure MCP spec (default, fully agnostic)
-targets: ["anthropic"]               -> one consumer
-targets: ["anthropic","openai"]      -> portable: tool must satisfy BOTH
-portable: true  (or target generic-strict) -> survives every major provider
+--target (none)                      -> pure MCP spec (default, fully agnostic)
+--target anthropic                   -> one consumer
+--target anthropic,openai            -> portable: tool must satisfy BOTH
+--portable                           -> survives every major provider
 ```
 
 ### Shipped profiles
@@ -25,49 +82,37 @@ portable: true  (or target generic-strict) -> survives every major provider
 | `anthropic` | llm-provider | ✅ | `^[a-zA-Z0-9_-]{1,64}$` | strict mode drops min/max/length + recursion |
 | `openai` | llm-provider | ✅ | `^[a-zA-Z0-9_-]{1,64}$` | description ≤1024; strict = addlProps:false + all-required, depth ≤5 |
 | `gemini` | llm-provider | ✅ | `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$` | OpenAPI-3.0 subset (allowlist); no anyOf/$ref baseline |
-| `mistral` | llm-provider | ⛔ stub | — | demonstrates the extension pattern; fill from docs |
+| `mistral` | llm-provider | ⛔ stub | — | demonstrates the extension pattern |
 | `generic-strict` | synthetic | ✅ | `^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$` | strictest common denominator (`--portable`) |
 
-`verified:true` means every constraint was read from that consumer's own docs (cited in `source`). Findings from a `verified:false` profile are flagged by `meta/profile-unverified` so a guessed number never reads as fact.
+`verified: true` means every constraint was read from that consumer's own docs (cited in `source`). Findings from a `verified: false` profile are flagged by `meta/profile-unverified`, so a guessed number never reads as fact.
 
 ### The flagship divergence this catches
 
-A name like `admin.tools.list` is **legal per the MCP spec** (dots allowed, up to 128 chars, only a SHOULD) but is **rejected by Anthropic and OpenAI** (`^[a-zA-Z0-9_-]{1,64}$`, no dots). No existing tool flags that. `provider/name-pattern` does.
+A name like `admin.tools.list` is **legal per the MCP spec** (dots allowed, up to 128 chars, only a SHOULD) but is **rejected by Anthropic and OpenAI** (`^[a-zA-Z0-9_-]{1,64}$`, no dots). `provider/name-pattern` catches exactly this class of "works in my host, breaks under that provider" portability bug.
 
 ## Language-agnostic: lints the wire, not the source
 
-mcpconform never parses your server's source code, so it does not care whether the server is Python, Node, Go, Rust, or a compiled binary. MCP is a *wire protocol* — a Python server and a Node server emit byte-identical `tools/list` JSON — so the linter validates that protocol surface, not the implementation. (Same root decision as provider-agnostic: operate on the protocol surface, not the internals.)
+mcpconform never parses your server's source code, so it doesn't care whether the server is Python, Node, Go, Rust, or a compiled binary. MCP is a *wire protocol* — a Python server and a Node server emit byte-identical `tools/list` JSON — so the linter validates that protocol surface, not the implementation.
 
-Two ways to feed it tool definitions:
+The launch command for `inspect` comes from the config, so `python server.py`, `node server.js`, `uvx foo`, `npx bar`, a binary, or a Docker image are all handled by one generic path.
 
-- **Static (no execution, CI-safe):** lint JSON files directly — `server.json`, client configs, or a captured `tools/list` dump committed to the repo. Zero runtime, offline, deterministic. The default for manifests and configs.
-- **Introspection (any language):** launch or connect to the server and call `tools/list` over stdio/HTTP — exactly what a client does. The launch command (`command` + `args`) comes from the config, so `python server.py`, `node server.js`, `uvx foo`, `npx bar`, a binary, or a Docker image are all handled by one generic path.
+Static *source* analysis — extracting tool decorators without running the server — is a deliberate **non-goal**: it would need a parser per framework (FastMCP, the TS SDK, mcp-go, …) and re-break on every framework change. Linting the wire keeps mcpconform both language- *and* framework-agnostic.
 
-Static *source* analysis — extracting tool decorators without running the server — is a deliberate **non-goal**: it would need a parser per framework (FastMCP, the TS SDK, mcp-go, ...) and re-break on every framework change. Linting the wire keeps mcpconform both language- *and* framework-agnostic.
+## Severity tiers
 
-## Files
+Every rule lives in `rules.json` with an `id`, a `tier`, and a `source` citation. Three tiers:
 
-- `profiles/profile.schema.json` — the meta-schema every profile validates against.
-- `profiles/*.json` — one consumer per file.
-- `rules.json` — the full rule catalog (id, tier, source citation, bad/good). Three tiers: `error` (spec MUST / 400), `warn` (spec SHOULD), `info` (opinionated; AI-judged rules land here later).
-- `mcpconform.config.example.json` — targeting + per-rule severity overrides.
+- **`error`** — spec MUST, or a provider would 400 the request.
+- **`warn`** — spec SHOULD.
+- **`info`** — opinionated quality and portability checks.
 
-## Status
+Targeting and per-rule severity overrides live in `mcpconform.config.json` (see `mcpconform.config.example.json`).
 
-Phase 1 done: CLI engine (`src/`) with ajv-backed schema rules + `--mode strict`, linting all three artifacts — **tool definitions**, **`server.json`**, and **client config** — auto-detected by shape (override with `--type`). Lints multiple files at once; human + SARIF output (`--format sarif --out file.sarif`). Ships a composite **GitHub Action** (`action.yml`) + example workflow that uploads SARIF to the Security tab. 22 tests passing.
+## Contributing
 
-```sh
-node src/index.mjs path/to/server.json .mcp.json tools.json --target anthropic,openai
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: providers and hosts are **data** (`profiles/*.json`), rules are **data + a check** (`rules.json` + `src/`), and the engine stays vendor-agnostic. Keep `verified` honest and add a test for any rule change.
 
-Also includes `mcpconform inspect -- <command>` — pulls `tools/list` from a live server in any language via the MCP stdio handshake, then lints it (for servers you can't get a static dump from):
+## License
 
-```sh
-node src/index.mjs inspect --target anthropic,openai -- python server.py
-```
-
-Servers that need env vars to start (API keys, etc.) inherit your shell env, or pass `--env-file .env` / `--env KEY=VAL`. Tool listing rarely makes network calls, so **placeholder values are usually enough** to get the tool surface. In CI, prefer linting a committed `tools/list` dump or `server.json` so no secrets are needed at all — capture a reusable dump once with `mcpconform inspect --dump tools.json -- <cmd>`.
-
-Remaining before a 1.0 release: publish to npm / PyPI (when the maintainer gives the go).
-
-Spec baseline: **MCP 2025-11-25**.
+MIT
