@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://mcplint.dev/schemas/profile.schema.json",
-  "title": "mcplint consumer profile",
-  "description": "Declarative capability profile for a tool-definition CONSUMER — an LLM-provider tool-use API (Anthropic, OpenAI, Gemini, ...) or an MCP host (Claude Desktop, Cursor, ...). mcplint is provider-agnostic: every consumer, including the MCP spec itself, is described by one of these files. No vendor is privileged in the engine; the generic provider/* rule family reads whichever profile(s) the run targets.",
+  "$id": "https://mcpconform.dev/schemas/profile.schema.json",
+  "title": "mcpconform consumer profile",
+  "description": "Declarative capability profile for a tool-definition CONSUMER — an LLM-provider tool-use API (Anthropic, OpenAI, Gemini, ...) or an MCP host (Claude Desktop, Cursor, ...). mcpconform is provider-agnostic: every consumer, including the MCP spec itself, is described by one of these files. No vendor is privileged in the engine; the generic provider/* rule family reads whichever profile(s) the run targets.",
   "type": "object",
   "required": ["id", "kind", "verified"],
   "additionalProperties": false,

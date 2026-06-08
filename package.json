@@ -1,10 +1,10 @@
 {
-  "name": "mcplint",
+  "name": "mcpconform",
   "version": "0.1.0",
   "description": "Provider- and language-agnostic static linter for MCP tool definitions, server.json, and client config.",
   "type": "module",
   "bin": {
-    "mcplint": "src/index.mjs"
+    "mcpconform": "src/index.mjs"
   },
   "scripts": {
     "test": "node --test --test-force-exit",
@@ -31,11 +31,11 @@
   "author": "cejor6",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cejor6/mcplint.git"
+    "url": "git+https://github.com/cejor6/mcpconform.git"
   },
-  "homepage": "https://github.com/cejor6/mcplint#readme",
+  "homepage": "https://github.com/cejor6/mcpconform#readme",
   "bugs": {
-    "url": "https://github.com/cejor6/mcplint/issues"
+    "url": "https://github.com/cejor6/mcpconform/issues"
   },
   "engines": {
     "node": ">=18"

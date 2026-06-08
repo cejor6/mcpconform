@@ -1,4 +1,4 @@
-// Minimal MCP stdio server for testing `mcplint inspect`. Newline-delimited
+// Minimal MCP stdio server for testing `mcpconform inspect`. Newline-delimited
 // JSON-RPC: answers initialize and tools/list; exposes one bad + one good tool.
 // NOTE: kept OUTSIDE test/ so `node --test` does not execute it as a test file
 // (it listens on stdin forever, which would hang the runner).
@@ -29,9 +29,9 @@ process.stdin.on("data", (c) => {
         { name: "bad.tool", inputSchema: { type: "object" } },
         { name: "good_tool", description: "A perfectly fine tool.", inputSchema: { type: "object" } },
       ];
-      // Proves env passthrough: only present when the parent supplied MCPLINT_TEST.
-      if (process.env.MCPLINT_TEST)
-        tools.push({ name: `env_${process.env.MCPLINT_TEST}`, description: "env-derived", inputSchema: { type: "object" } });
+      // Proves env passthrough: only present when the parent supplied MCPCONFORM_TEST.
+      if (process.env.MCPCONFORM_TEST)
+        tools.push({ name: `env_${process.env.MCPCONFORM_TEST}`, description: "env-derived", inputSchema: { type: "object" } });
       send({ jsonrpc: "2.0", id: msg.id, result: { tools } });
     }
   }

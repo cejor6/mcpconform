@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// mcplint — provider- and language-agnostic static linter for MCP setup.
+// mcpconform — provider- and language-agnostic static linter for MCP setup.
 // Phase-1 engine: dependency-free. Lints a tools/list dump (or bare array) of
 // MCP Tool objects against the core spec rules + targeted provider profiles.
 // (server.json / client-config linters and ajv-backed schema rules land next.)
@@ -97,11 +97,11 @@ function siblingPackageVersion(filePath) {
 const args = parseArgs(process.argv.slice(2));
 const pkg = loadJSON(join(ROOT, "package.json"));
 
-const HELP = `mcplint ${pkg.version} - static linter for MCP tool defs, server.json, and client config
+const HELP = `mcpconform ${pkg.version} - static linter for MCP tool defs, server.json, and client config
 
 USAGE
-  mcplint <file...> [options]              lint files (type auto-detected by shape)
-  mcplint inspect [options] -- <cmd...>    start a live MCP server and lint its tools/list
+  mcpconform <file...> [options]              lint files (type auto-detected by shape)
+  mcpconform inspect [options] -- <cmd...>    start a live MCP server and lint its tools/list
 
 OPTIONS
   --target <a,b>     provider profiles to check against (e.g. anthropic,openai); empty = MCP-spec only
@@ -110,7 +110,7 @@ OPTIONS
   --type <t>         force artifact type: tools | server-json | client-config
   --format <f>       human (default) | sarif
   --out <file>       write the report to a file instead of stdout
-  --config <file>    config file (default: ./mcplint.config.json)
+  --config <file>    config file (default: ./mcpconform.config.json)
   --env-file <.env>  (inspect) load env vars for the spawned server
   --env KEY=VAL      (inspect) set an env var for the spawned server (repeatable)
   --dump <file>      (inspect) also write the captured tools/list to a file
@@ -118,9 +118,9 @@ OPTIONS
   -v, --version      print version
 
 EXAMPLES
-  mcplint server.json .mcp.json
-  mcplint tools.json --target anthropic,openai
-  mcplint inspect --env-file .env -- python server.py`;
+  mcpconform server.json .mcp.json
+  mcpconform tools.json --target anthropic,openai
+  mcpconform inspect --env-file .env -- python server.py`;
 
 if (args.version) {
   console.log(pkg.version);
@@ -134,7 +134,7 @@ if (args.help || (!args._.length && !args.rest.length)) {
 const ruleMeta = Object.fromEntries(loadJSON(join(ROOT, "rules.json")).rules.map((r) => [r.id, r]));
 
 let config = {};
-const cfgPath = args.config ? resolve(args.config) : join(process.cwd(), "mcplint.config.json");
+const cfgPath = args.config ? resolve(args.config) : join(process.cwd(), "mcpconform.config.json");
 if (existsSync(cfgPath)) {
   try {
     config = loadJSON(cfgPath);
@@ -164,7 +164,7 @@ const mode = args.mode || config.mode || "default";
 if (args._[0] === "inspect") {
   const cmd = args.rest.length ? args.rest : args._.slice(1);
   if (!cmd.length) {
-    console.error("usage: mcplint inspect [--target a,b] -- <command> [args...]");
+    console.error("usage: mcpconform inspect [--target a,b] -- <command> [args...]");
     process.exit(2);
   }
   const env = { ...parseEnvFile(args.envFile) };
@@ -176,7 +176,7 @@ if (args._[0] === "inspect") {
   try {
     tools = await inspectStdio(cmd[0], cmd.slice(1), { env });
   } catch (e) {
-    console.error(`mcplint inspect: ${e.message}`);
+    console.error(`mcpconform inspect: ${e.message}`);
     console.error(
       "hint: if the server needs env vars to start, pass --env-file <.env> or --env KEY=VAL " +
         "(tool listing rarely hits the network, so placeholder values are usually enough), " +

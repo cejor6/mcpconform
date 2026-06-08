@@ -1,4 +1,4 @@
-name: mcplint
+name: mcpconform
 description: Lint MCP tool definitions, server.json, and client config; emit SARIF for code scanning.
 branding:
   icon: check-circle
@@ -18,7 +18,7 @@ inputs:
   output:
     description: SARIF output path.
     required: false
-    default: mcplint.sarif
+    default: mcpconform.sarif
 outputs:
   sarif:
     description: Path to the generated SARIF file.
@@ -29,10 +29,10 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: "22"
-    - name: Install mcplint runtime deps
+    - name: Install mcpconform runtime deps
       shell: bash
       run: npm ci --omit=dev --prefix "$GITHUB_ACTION_PATH"
-    - name: Run mcplint
+    - name: Run mcpconform
       shell: bash
       run: |
         targets=""

@@ -5,7 +5,7 @@ const LABEL = { error: "ERROR", warn: "WARN ", info: "INFO " };
 
 export function renderHuman(findings, ruleMeta, meta) {
   const lines = [];
-  for (const s of meta.summaries || []) lines.push(`mcplint  ${s}`);
+  for (const s of meta.summaries || []) lines.push(`mcpconform  ${s}`);
   if (meta.missing?.length) lines.push(`  ! unknown target profile(s) ignored: ${meta.missing.join(", ")}`);
   lines.push("");
 
@@ -46,9 +46,9 @@ export function renderSarif(findings, ruleMeta, meta) {
         {
           tool: {
             driver: {
-              name: "mcplint",
+              name: "mcpconform",
               version: "0.1.0",
-              informationUri: "https://github.com/cejor6/mcplint",
+              informationUri: "https://github.com/cejor6/mcpconform",
               rules: ids.map((id) => ({
                 id,
                 shortDescription: { text: ruleMeta[id]?.message ?? id },
