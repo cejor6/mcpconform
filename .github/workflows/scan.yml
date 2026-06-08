@@ -21,7 +21,7 @@ jobs:
           targets: anthropic,openai
       - name: Upload SARIF to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.mcpconform.outputs.sarif }}
           category: mcpconform
