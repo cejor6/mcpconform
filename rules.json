@@ -192,6 +192,7 @@
       "id": "tool/meta-namespacing",
       "tier": "info",
       "appliesTo": "tool",
+      "aggregate": true,
       "source": "spec _meta rules (SHOULD be reverse-DNS namespaced)",
       "message": "_meta key is not reverse-DNS namespaced (often framework-injected, e.g. fastmcp)."
     },
@@ -274,6 +275,7 @@
       "tier": "info",
       "appliesTo": "tool",
       "family": "provider",
+      "aggregate": true,
       "reads": "inputSchema.unenforcedKeywords",
       "source": "active profile(s)",
       "message": "Keyword is accepted but not enforced by the targeted consumer (no effect on output). Promoted to error under strict mode if strict.rejectsUnenforcedKeywords.",

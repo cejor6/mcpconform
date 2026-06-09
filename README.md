@@ -32,6 +32,7 @@ mcpconform server.json .mcp.json tools.json --target anthropic,openai
 - `--mode strict` — also apply each provider's strict-mode constraints.
 - `--format sarif --out file.sarif` — emit SARIF for GitHub code scanning.
 - `--min-severity error|warn|info` — report only findings at or above this tier. This is a **display filter**, not a fail-gate: the exit code is unaffected — only `error`-tier findings ever fail a run. Also settable as `minSeverity` in config. Handy in CI to drop info-tier noise without per-rule `off` suppressions.
+- `--expand` — a few info rules flag framework-injected noise that repeats identically on every tool (e.g. FastMCP stamping a non-reverse-DNS `_meta` key on all of them). By default, when such a finding hits 3+ tools it collapses to a single line with a count — in the human report **and** in SARIF (one alert instead of N identical ones). `--expand` (or `expand` in config) lists every occurrence. Collapsing is display-only (never changes the exit code) and opt-in per rule (`aggregate: true` in `rules.json`): `warn`/`error` and per-tool-actionable info findings always stay itemized with their tool names.
 
 ### Lint a live server (any language)
 

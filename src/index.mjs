@@ -27,6 +27,7 @@ function parseArgs(argv) {
     else if (a === "--mode") out.mode = argv[++i];
     else if (a === "--min-severity") out.minSeverity = argv[++i] ?? "";
     else if (a === "--min-tools") out.minTools = argv[++i] ?? "";
+    else if (a === "--expand") out.expand = true;
     else if (a === "--portable") out.portable = true;
     else if (a === "--type") out.type = argv[++i];
     else if (a === "--out") out.out = argv[++i];
@@ -113,6 +114,8 @@ OPTIONS
   --format <f>       human (default) | sarif
   --min-severity <s> report only findings at or above this tier: error | warn | info
                      (display filter; exit code is unaffected. default: info = all)
+  --expand           list every finding; by default an info finding repeated on 3+
+                     tools (framework-injected noise) is collapsed to one line
   --out <file>       write the report to a file instead of stdout
   --config <file>    config file (default: ./mcpconform.config.json)
   --env-file <.env>  (inspect) load env vars for the spawned server
@@ -194,12 +197,58 @@ if (minToolsRaw !== undefined && minToolsRaw !== null) {
   }
 }
 
-// Single place that applies the reporting floor, writes/prints, and returns the
-// exit code (1 iff an error-tier finding survived). Shared by the inspect path
-// and the file-lint path so the render + exit logic lives in exactly one spot.
-function emitReport(findings, meta) {
+const expand = args.expand || config.expand || false;
+
+// Collapse repeated framework-injected noise. Some info rules fire identically on
+// every tool when a framework stamps the same thing on all of them - e.g.
+// tool/meta-namespacing on FastMCP's non-reverse-DNS `_meta` key, or
+// provider/schema-unenforced-keyword on a codebase that puts minimum/maximum on
+// every tool. There, N identical lines are pure noise: when such a finding
+// (grouped by file + rule + identical message) repeats on AGG_MIN+ tools within
+// one artifact, report it once with a count.
+//
+// Which rules collapse is OPT-IN per rule (`aggregate: true` in rules.json), NOT
+// inferred from the message - most info rules (no-params-shape, title-redundant,
+// property-descriptions, ...) are per-tool actionable and must stay itemized with
+// their tool names. The message is still part of the group key so different causes
+// (different `_meta` keys / keywords) stay separate. Display-only: the exit code is
+// computed before this runs. Vendor-agnostic: the opt-in lives in data, never a
+// name in the engine. toolCounts maps an artifact to its tool count, only to say
+// "all N tools" vs "N tools". One order-preserving pass: the collapsed line takes
+// the slot of the first occurrence; later ones are dropped.
+const AGG_MIN = 3;
+function aggregate(findings, toolCounts) {
+  const aggregatable = (f) => ruleMeta[f.id]?.aggregate && f.tool != null;
+  const keyOf = (f) => JSON.stringify([f.file, f.id, f.message]);
+  const sizes = new Map();
+  for (const f of findings) {
+    if (!aggregatable(f)) continue;
+    const k = keyOf(f);
+    sizes.set(k, (sizes.get(k) || 0) + 1);
+  }
+  const done = new Set();
+  const out = [];
+  for (const f of findings) {
+    const n = aggregatable(f) ? sizes.get(keyOf(f)) : 0;
+    if (n < AGG_MIN) { out.push(f); continue; } // itemize: not aggregatable, or below threshold
+    const k = keyOf(f);
+    if (done.has(k)) continue; // a later occurrence of an already-collapsed group
+    done.add(k);
+    const everyTool = toolCounts[f.file] != null && n === toolCounts[f.file];
+    out.push({ ...f, tool: null, message: f.message + (everyTool ? ` (on all ${n} tools)` : ` (on ${n} tools)`) });
+  }
+  return out;
+}
+
+// Single place that applies the reporting floor + aggregation, writes/prints,
+// and returns the exit code (1 iff an error-tier finding survived). Shared by the
+// inspect path and the file-lint path so render + exit logic lives in one spot.
+// The exit code is taken from the floored-but-unaggregated set, so neither the
+// floor nor aggregation (both display-only) can ever change it.
+function emitReport(findings, meta, toolCounts = {}) {
   const shown = findings.filter(atOrAboveFloor);
-  const output = args.format === "sarif" ? renderSarif(shown, ruleMeta, meta) : renderHuman(shown, ruleMeta, meta);
+  const reported = expand ? shown : aggregate(shown, toolCounts);
+  const output = args.format === "sarif" ? renderSarif(reported, ruleMeta, meta) : renderHuman(reported, ruleMeta, meta);
   if (args.out) writeFileSync(resolve(args.out), output + "\n");
   else console.log(output);
   return shown.some((f) => f.tier === "error") ? 1 : 0;
@@ -252,7 +301,7 @@ if (args._[0] === "inspect") {
         `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
   const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
   const meta = { summaries: [`${label}  [tools]  (${tools.length} tools, ${tgt})`], targets: targetIds, missing };
-  process.exit(emitReport(findings, meta));
+  process.exit(emitReport(findings, meta, { [label]: tools.length }));
 }
 
 function lintOne(fileArg) {
@@ -283,7 +332,7 @@ function lintOne(fileArg) {
         emit("meta/profile-unverified", null,
           `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
     const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
-    return { findings, summary: `${fileArg}  [tools]  (${tools.length} tools, ${tgt})` };
+    return { findings, summary: `${fileArg}  [tools]  (${tools.length} tools, ${tgt})`, toolCount: tools.length };
   }
   if (type === "server-json") {
     runServerJsonRules(artifact, emit, { packageVersion: siblingPackageVersion(apath) });
@@ -299,11 +348,13 @@ function lintOne(fileArg) {
 
 const allFindings = [];
 const summaries = [];
+const toolCounts = {};
 for (const fileArg of args._) {
-  const { findings, summary } = lintOne(fileArg);
+  const { findings, summary, toolCount } = lintOne(fileArg);
   allFindings.push(...findings);
   summaries.push(summary);
+  if (toolCount != null) toolCounts[fileArg] = toolCount;
 }
 
 const meta = { summaries, targets: targetIds, missing };
-process.exit(emitReport(allFindings, meta));
+process.exit(emitReport(allFindings, meta, toolCounts));

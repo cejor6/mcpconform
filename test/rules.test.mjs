@@ -436,3 +436,83 @@ test("cli: config.minSeverity is honored from the config file", () => {
   assert.doesNotMatch(r.out, /WARN /);
   assert.doesNotMatch(r.out, /INFO /);
 });
+
+// --- aggregation of repeated framework-injected info findings ---
+function tmpTools(tools) {
+  const f = join(tmpdir(), `mcpconform-agg-${tools.length}-${tools[0]?.name ?? "x"}.json`);
+  writeFileSync(f, JSON.stringify({ tools }));
+  return f;
+}
+// n clean tools that each carry the same non-reverse-DNS _meta key (the FastMCP
+// injection pattern) -> tool/meta-namespacing (info) fires identically on each.
+const injected = (n) =>
+  Array.from({ length: n }, (_, i) => ({
+    name: `t_${i}`,
+    description: "d",
+    inputSchema: { type: "object", properties: { a: { type: "string", description: "x" } }, required: ["a"] },
+    annotations: { readOnlyHint: true },
+    _meta: { fastmcp: { v: "1" } },
+  }));
+
+test("cli: an info finding repeated on 3+ tools collapses to one aggregated line", () => {
+  const r = cli([tmpTools(injected(4))]);
+  assert.match(r.out, /tool\/meta-namespacing/);
+  assert.match(r.out, /on all 4 tools/);
+  assert.match(r.out, /framework-injected/); // hint comes from the rule's own message
+  assert.match(r.out, /0 error, 0 warn, 1 info/); // 4 identical infos -> 1 line
+});
+
+test("cli: aggregation collapses at exactly AGG_MIN (3) tools", () => {
+  const r = cli([tmpTools(injected(3))]);
+  assert.match(r.out, /on all 3 tools/);
+  assert.match(r.out, /0 error, 0 warn, 1 info/);
+});
+
+// Only rules flagged `aggregate:true` collapse. A per-tool-actionable info rule
+// (tool/no-params-shape) firing identically on every tool must STAY itemized with
+// its tool names, and must NOT get the aggregated "on all N tools" wording.
+test("cli: a non-aggregatable info rule is never collapsed, keeps tool names", () => {
+  const file = tmpTools(Array.from({ length: 3 }, (_, i) => ({ name: `np_${i}`, description: "d", inputSchema: { type: "object" } })));
+  const r = cli([file]);
+  assert.match(r.out, /tool\/no-params-shape/);
+  assert.match(r.out, /0 error, 0 warn, 3 info/); // itemized, not collapsed
+  assert.match(r.out, /\[np_0\]/);
+  assert.match(r.out, /\[np_2\]/); // per-tool names preserved
+  assert.doesNotMatch(r.out, /on all 3 tools/);
+});
+
+test("cli: --expand itemizes the repeated finding instead of collapsing", () => {
+  const r = cli([tmpTools(injected(4)), "--expand"]);
+  assert.match(r.out, /0 error, 0 warn, 4 info/);
+  assert.match(r.out, /\[t_0\]/);
+  assert.match(r.out, /\[t_3\]/); // every occurrence keeps its tool name
+});
+
+test("cli: config.expand disables aggregation", () => {
+  const cfg = join(tmpdir(), "mcpconform-expand-cfg.json");
+  writeFileSync(cfg, JSON.stringify({ expand: true }));
+  const r = cli([tmpTools(injected(4)), "--config", cfg]);
+  assert.match(r.out, /0 error, 0 warn, 4 info/);
+});
+
+test("cli: aggregation collapses the SARIF results too (one result, not N)", () => {
+  const sarif = JSON.parse(cli([tmpTools(injected(4)), "--format", "sarif"]).out);
+  const meta = sarif.runs[0].results.filter((x) => x.ruleId === "tool/meta-namespacing");
+  assert.equal(meta.length, 1);
+  assert.match(meta[0].message.text, /on all 4 tools/);
+});
+
+test("cli: below the threshold (2 repeats) stays itemized", () => {
+  const r = cli([tmpTools(injected(2))]);
+  assert.match(r.out, /0 error, 0 warn, 2 info/);
+  assert.doesNotMatch(r.out, /on all 2 tools/);
+});
+
+test("cli: error-tier repeats are never aggregated", () => {
+  // 3 tools each missing inputSchema -> tool/input-schema-required (error) x3
+  const file = tmpTools(Array.from({ length: 3 }, (_, i) => ({ name: `e_${i}`, description: "d" })));
+  const r = cli([file]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /3 error/);
+  assert.doesNotMatch(r.out, /on all 3 tools/);
+});
