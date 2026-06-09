@@ -352,3 +352,45 @@ test("cli: --help exits 0 with usage; --version prints semver", () => {
   assert.equal(v.code, 0);
   assert.match(v.out.trim(), /^\d+\.\d+\.\d+/);
 });
+
+// --- --min-severity (display floor) ---
+test("cli: --min-severity error shows only error-tier findings, still exits 1", () => {
+  const r = cli(["examples/tools.bad.json", "--target", "anthropic", "--min-severity", "error"]);
+  assert.equal(r.code, 1); // errors survive any floor
+  assert.match(r.out, /ERROR /);
+  assert.doesNotMatch(r.out, /WARN /); // warn finding labels dropped
+  assert.doesNotMatch(r.out, /INFO /); // info finding labels dropped
+});
+
+test("cli: --min-severity warn drops info but keeps warn and error", () => {
+  const r = cli(["examples/tools.bad.json", "--target", "anthropic", "--min-severity", "warn"]);
+  assert.match(r.out, /WARN /);
+  assert.match(r.out, /ERROR /);
+  assert.doesNotMatch(r.out, /INFO /);
+});
+
+test("cli: invalid --min-severity exits 2 with a usage message", () => {
+  const r = cli(["examples/tools.good.json", "--min-severity", "loud"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /min-severity/);
+});
+
+// --- --min-tools (inspect live-surface floor) ---
+const mock = join(ROOT, "fixtures/mock-server.mjs");
+
+test("cli inspect: --min-tools above the surfaced count fails the guard (exit 2)", () => {
+  const r = cli(["inspect", "--min-tools", "5", "--", process.execPath, mock]);
+  assert.equal(r.code, 2); // mock surfaces 2 tools; floor of 5 not met
+  assert.match(r.out, /min-tools/);
+});
+
+test("cli inspect: --min-tools met does not trigger the guard", () => {
+  const r = cli(["inspect", "--min-tools", "2", "--", process.execPath, mock]);
+  assert.notEqual(r.code, 2); // 2 tools meets the floor; guard passes (lint may still exit 0/1)
+});
+
+test("cli: invalid --min-tools exits 2 with a usage message", () => {
+  const r = cli(["examples/tools.good.json", "--min-tools", "abc"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /min-tools/);
+});

@@ -25,6 +25,8 @@ function parseArgs(argv) {
     else if (a === "--target") out.target = (argv[++i] || "").split(",").filter(Boolean);
     else if (a === "--format") out.format = argv[++i];
     else if (a === "--mode") out.mode = argv[++i];
+    else if (a === "--min-severity") out.minSeverity = argv[++i];
+    else if (a === "--min-tools") out.minTools = argv[++i];
     else if (a === "--portable") out.portable = true;
     else if (a === "--type") out.type = argv[++i];
     else if (a === "--out") out.out = argv[++i];
@@ -109,10 +111,12 @@ OPTIONS
   --mode <m>         default | strict (applies each profile's strict{} rules)
   --type <t>         force artifact type: tools | server-json | client-config
   --format <f>       human (default) | sarif
+  --min-severity <s> only report findings at or above this tier: error | warn | info (default: info = all)
   --out <file>       write the report to a file instead of stdout
   --config <file>    config file (default: ./mcpconform.config.json)
   --env-file <.env>  (inspect) load env vars for the spawned server
   --env KEY=VAL      (inspect) set an env var for the spawned server (repeatable)
+  --min-tools <n>    (inspect) fail (exit 2) if the live server surfaces fewer than n tools
   --dump <file>      (inspect) also write the captured tools/list to a file
   -h, --help         show this help
   -v, --version      print version
@@ -161,6 +165,27 @@ const activeProfiles = targetIds.map((id) => allProfiles[id]).filter(Boolean);
 const severityFor = (id) => sevOverrides[id] || ruleMeta[id]?.tier || "warn";
 const mode = args.mode || config.mode || "default";
 
+// Display threshold: drop findings below the requested tier from the report
+// (and the exit-code calc, which is moot since error always clears any floor).
+// CLI flag wins over config.minSeverity; default "info" keeps every finding.
+const TIER_RANK = { error: 0, warn: 1, info: 2 };
+const minSeverity = args.minSeverity || config.minSeverity || "info";
+if (!(minSeverity in TIER_RANK)) {
+  console.error(`mcpconform: --min-severity must be error|warn|info (got "${minSeverity}")`);
+  process.exit(2);
+}
+const atOrAboveFloor = (f) => TIER_RANK[f.tier] <= TIER_RANK[minSeverity];
+
+// inspect-only floor on the live tool count: a server that boots but registers
+// zero (or too few) tools would otherwise lint nothing and pass green. CLI flag
+// wins over config.minTools; default 0 disables the guard.
+const minToolsRaw = args.minTools != null ? args.minTools : config.minTools;
+const minTools = minToolsRaw != null ? Number(minToolsRaw) : 0;
+if (!Number.isInteger(minTools) || minTools < 0) {
+  console.error(`mcpconform: --min-tools must be a non-negative integer (got "${minToolsRaw}")`);
+  process.exit(2);
+}
+
 if (args._[0] === "inspect") {
   const cmd = args.rest.length ? args.rest : args._.slice(1);
   if (!cmd.length) {
@@ -185,6 +210,13 @@ if (args._[0] === "inspect") {
     process.exit(2);
   }
   if (args.dump) writeFileSync(resolve(args.dump), JSON.stringify({ tools }, null, 2) + "\n");
+  if (tools.length < minTools) {
+    console.error(
+      `mcpconform inspect: server surfaced ${tools.length} tool(s); --min-tools requires at least ${minTools}. ` +
+        "The server booted but registered too few tools — likely a broken tool import or registration."
+    );
+    process.exit(2);
+  }
   const label = `inspect:${cmd.join(" ")}`;
   const findings = [];
   const emit = (id, tool, message, profile = null) => {
@@ -201,10 +233,11 @@ if (args._[0] === "inspect") {
         `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
   const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
   const meta = { summaries: [`${label}  [tools]  (${tools.length} tools, ${tgt})`], targets: targetIds, missing };
-  const output = args.format === "sarif" ? renderSarif(findings, ruleMeta, meta) : renderHuman(findings, ruleMeta, meta);
+  const shown = findings.filter(atOrAboveFloor);
+  const output = args.format === "sarif" ? renderSarif(shown, ruleMeta, meta) : renderHuman(shown, ruleMeta, meta);
   if (args.out) writeFileSync(resolve(args.out), output + "\n");
   else console.log(output);
-  process.exit(findings.some((f) => f.tier === "error") ? 1 : 0);
+  process.exit(shown.some((f) => f.tier === "error") ? 1 : 0);
 }
 
 function lintOne(fileArg) {
@@ -258,8 +291,9 @@ for (const fileArg of args._) {
 }
 
 const meta = { summaries, targets: targetIds, missing };
-const output = args.format === "sarif" ? renderSarif(allFindings, ruleMeta, meta) : renderHuman(allFindings, ruleMeta, meta);
+const shown = allFindings.filter(atOrAboveFloor);
+const output = args.format === "sarif" ? renderSarif(shown, ruleMeta, meta) : renderHuman(shown, ruleMeta, meta);
 if (args.out) writeFileSync(resolve(args.out), output + "\n");
 else console.log(output);
 
-process.exit(allFindings.some((f) => f.tier === "error") ? 1 : 0);
+process.exit(shown.some((f) => f.tier === "error") ? 1 : 0);
