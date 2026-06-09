@@ -1,6 +1,6 @@
 {
   "name": "mcpconform",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Provider- and language-agnostic static linter for MCP tool definitions, server.json, and client config.",
   "type": "module",
   "bin": {

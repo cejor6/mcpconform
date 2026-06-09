@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "specBaseline": "mcp-2025-11-25",
   "tiers": {
     "error": "MCP spec MUST, schema-invalid, or a declared consumer will hard-reject (a 400).",

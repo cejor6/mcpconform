@@ -47,7 +47,7 @@ export function renderSarif(findings, ruleMeta, meta) {
           tool: {
             driver: {
               name: "mcpconform",
-              version: "0.1.0",
+              version: meta.version || "0.0.0",
               informationUri: "https://github.com/cejor6/mcpconform",
               rules: ids.map((id) => ({
                 id,
