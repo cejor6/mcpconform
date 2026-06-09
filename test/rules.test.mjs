@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { runCoreRules, runProviderRules } from "../src/rules.mjs";
 import { validateInputSchema, checkProviderSchema } from "../src/schema.mjs";
 import { runServerJsonRules } from "../src/server-json.mjs";
@@ -384,13 +385,54 @@ test("cli inspect: --min-tools above the surfaced count fails the guard (exit 2)
   assert.match(r.out, /min-tools/);
 });
 
-test("cli inspect: --min-tools met does not trigger the guard", () => {
+test("cli inspect: --min-tools exactly at the surfaced count passes the guard", () => {
+  // mock surfaces 2 tools (warn/info only, no errors), so floor of 2 -> guard
+  // passes and the lint itself exits 0. Assert the guard did NOT fire.
   const r = cli(["inspect", "--min-tools", "2", "--", process.execPath, mock]);
-  assert.notEqual(r.code, 2); // 2 tools meets the floor; guard passes (lint may still exit 0/1)
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(r.out, /min-tools/);
 });
 
 test("cli: invalid --min-tools exits 2 with a usage message", () => {
   const r = cli(["examples/tools.good.json", "--min-tools", "abc"]);
   assert.equal(r.code, 2);
   assert.match(r.out, /min-tools/);
+});
+
+// flag passed as the last token (no value) must error, not silently no-op
+test("cli: --min-severity with no value exits 2", () => {
+  const r = cli(["examples/tools.good.json", "--min-severity"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /min-severity/);
+});
+
+test("cli: --min-tools with no value exits 2", () => {
+  const r = cli(["examples/tools.good.json", "--min-tools"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /min-tools/);
+});
+
+// the floor is display-only: a warn/info-only surface filtered to error shows
+// nothing and exits 0 (proving exit code is independent of the floor).
+test("cli inspect: --min-severity error on a warn/info-only surface shows nothing, exits 0", () => {
+  const r = cli(["inspect", "--min-severity", "error", "--", process.execPath, mock]);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /No findings/);
+});
+
+test("cli: --format sarif respects --min-severity (only error-level results emitted)", () => {
+  const r = cli(["examples/tools.bad.json", "--target", "anthropic", "--format", "sarif", "--min-severity", "error"]);
+  const sarif = JSON.parse(r.out);
+  const results = sarif.runs[0].results;
+  assert.ok(results.length > 0);
+  assert.ok(results.every((x) => x.level === "error"), "every SARIF result is error-level after the floor");
+});
+
+test("cli: config.minSeverity is honored from the config file", () => {
+  const cfg = join(tmpdir(), "mcpconform-cfg-minseverity.json");
+  writeFileSync(cfg, JSON.stringify({ targets: ["anthropic"], minSeverity: "error" }));
+  const r = cli(["examples/tools.bad.json", "--config", cfg]);
+  assert.equal(r.code, 1);
+  assert.doesNotMatch(r.out, /WARN /);
+  assert.doesNotMatch(r.out, /INFO /);
 });
