@@ -516,3 +516,9 @@ test("cli: error-tier repeats are never aggregated", () => {
   assert.match(r.out, /3 error/);
   assert.doesNotMatch(r.out, /on all 3 tools/);
 });
+
+test("cli: SARIF driver.version tracks package.json (no drift)", () => {
+  const pkgVersion = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+  const sarif = JSON.parse(cli(["examples/tools.good.json", "--format", "sarif"]).out);
+  assert.equal(sarif.runs[0].tool.driver.version, pkgVersion);
+});

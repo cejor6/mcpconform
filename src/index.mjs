@@ -300,7 +300,7 @@ if (args._[0] === "inspect") {
       emit("meta/profile-unverified", null,
         `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
   const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
-  const meta = { summaries: [`${label}  [tools]  (${tools.length} tools, ${tgt})`], targets: targetIds, missing };
+  const meta = { summaries: [`${label}  [tools]  (${tools.length} tools, ${tgt})`], targets: targetIds, missing, version: pkg.version };
   process.exit(emitReport(findings, meta, { [label]: tools.length }));
 }
 
@@ -356,5 +356,5 @@ for (const fileArg of args._) {
   if (toolCount != null) toolCounts[fileArg] = toolCount;
 }
 
-const meta = { summaries, targets: targetIds, missing };
+const meta = { summaries, targets: targetIds, missing, version: pkg.version };
 process.exit(emitReport(allFindings, meta, toolCounts));
