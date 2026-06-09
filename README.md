@@ -31,6 +31,7 @@ mcpconform server.json .mcp.json tools.json --target anthropic,openai
 - `--portable` — must satisfy the strictest common denominator of every major provider.
 - `--mode strict` — also apply each provider's strict-mode constraints.
 - `--format sarif --out file.sarif` — emit SARIF for GitHub code scanning.
+- `--min-severity error|warn|info` — report only findings at or above this tier. This is a **display filter**, not a fail-gate: the exit code is unaffected — only `error`-tier findings ever fail a run. Also settable as `minSeverity` in config. Handy in CI to drop info-tier noise without per-rule `off` suppressions.
 
 ### Lint a live server (any language)
 
@@ -44,6 +45,12 @@ Servers that need env vars to start inherit your shell env, or pass `--env-file 
 
 ```sh
 mcpconform inspect --dump tools.json -- <cmd>
+```
+
+In CI, add `--min-tools <n>` so a server that boots but registers too few tools fails the run (exit 2) instead of passing green having linted nothing — a broken tool import would otherwise go unnoticed:
+
+```sh
+mcpconform inspect --min-tools 1 -- <cmd>
 ```
 
 ### GitHub Action
