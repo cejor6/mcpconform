@@ -1,10 +1,55 @@
 # mcpconform
 
+[![npm version](https://img.shields.io/npm/v/mcpconform.svg)](https://www.npmjs.com/package/mcpconform)
+[![CI](https://github.com/cejor6/mcpconform/actions/workflows/ci.yml/badge.svg)](https://github.com/cejor6/mcpconform/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/npm/l/mcpconform.svg)](LICENSE)
+[![node: >=20](https://img.shields.io/node/v/mcpconform.svg)](package.json)
+
 A static linter for **MCP setup correctness**: tool definitions, the `server.json` registry manifest, and client config files (`.mcp.json` / `claude_desktop_config.json` / `mcpServers`). Think `shellcheck`/`hadolint`, but for the Model Context Protocol — and **provider-agnostic by design**.
 
 It checks, statically and offline, that your MCP setup is **correct and portable**. It is intentionally *not* a security scanner and *not* a live conformance tester — it validates the shape and portability of your tool surface, the part nothing else checks.
 
-Spec baseline: **MCP 2025-11-25**.
+Spec baseline: **MCP 2025-11-25**. On npm: [`mcpconform`](https://www.npmjs.com/package/mcpconform).
+
+## Lint your MCP server in 30 seconds
+
+No install, no config — point it at any tool dump, `server.json`, or client config:
+
+```sh
+npx mcpconform tools.json --target anthropic,openai
+```
+
+It auto-detects the artifact type, checks it against the MCP spec **and** each provider you target, and exits non-zero if anything would break — ready to drop into CI.
+
+```console
+$ npx mcpconform examples/tools.bad.json --target anthropic,openai
+mcpconform  examples/tools.bad.json  [tools]  (7 tools, targets: anthropic, openai)
+
+  ERROR provider/name-pattern <anthropic> [admin.tools.list]
+        name fails anthropic pattern ^[a-zA-Z0-9_-]{1,64}$
+  ERROR tool/input-schema-root-object [report_build]
+        inputSchema root type must be "object" (got "array").
+  ERROR tool/name-unique [search]
+        Duplicate tool name within the server.
+  WARN  tool/description-present [search]
+        No description; agents select tools from descriptions.
+  WARN  tool/destructive-needs-annotation [delete_account]
+        Mutating-verb tool lacks annotations (destructiveHint defaults to TRUE).
+  INFO  tool/no-params-shape [admin.tools.list]
+        Zero-parameter tool should set additionalProperties:false to accept only empty input.
+  … (remaining findings elided)
+
+  7 error, 3 warn, 5 info
+```
+
+A clean setup exits `0`:
+
+```console
+$ npx mcpconform examples/tools.good.json --target anthropic,openai
+mcpconform  examples/tools.good.json  [tools]  (1 tools, targets: anthropic, openai)
+
+  No findings.
+```
 
 ## Install
 
