@@ -1,0 +1,59 @@
+name: Bug report
+description: Report incorrect linter behavior — a false positive, a missed finding, or a crash.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! mcpconform lints the MCP **wire surface** (tool
+        definitions, `server.json`, client config) — the more of the offending
+        artifact you can share, the faster this gets fixed.
+  - type: input
+    id: version
+    attributes:
+      label: mcpconform version
+      description: Output of `npx mcpconform --version` (or the version you installed).
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command you ran
+      description: The full CLI invocation, including flags and targets.
+      placeholder: "npx mcpconform server.json --target anthropic,openai"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What finding (or clean pass) did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Paste the actual output. For a crash, include the full stack trace.
+      render: console
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Minimal sample artifact
+      description: >
+        The smallest tool dump / `server.json` / client config that reproduces this.
+        Redact any secrets — placeholder values are fine.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Node version (`node --version`) and OS.
+      placeholder: "Node 22.4.0, macOS 14"
+    validations:
+      required: false

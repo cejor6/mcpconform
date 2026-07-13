@@ -23,5 +23,6 @@ npm test
 
 ## Pull requests
 
-- Branch, then open a PR. CI (tests on Node 20 + 22) must pass.
+- Branch, then open a PR. CI must pass: tests on Node 20 + 22, plus a
+  self-lint job that dogfoods the linter on the `examples/` fixtures.
 - Keep `npm test` green and add tests for behavior changes.

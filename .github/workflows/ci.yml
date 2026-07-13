@@ -20,3 +20,26 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm ci
       - run: npm test
+
+  lint:
+    name: Self-lint (dogfood)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm ci
+      # The linter must FIND the seeded failures in the bad fixtures. Assert both
+      # exit 1 (findings) AND that a known seeded finding is actually in the output,
+      # so a crash (typo'd path, bad flag, uncaught exception — which can also exit
+      # 1) fails the job instead of reading green on an empty run.
+      - name: Lint bad fixtures (expect findings)
+        run: |
+          out=$(node src/index.mjs examples/tools.bad.json --target anthropic,openai) && code=0 || code=$?
+          echo "$out"
+          test "$code" -eq 1 || { echo "::error::expected exit 1 (findings), got $code"; exit 1; }
+          echo "$out" | grep -q 'provider/name-pattern' || { echo "::error::seeded finding 'provider/name-pattern' missing — linter did not run as expected"; exit 1; }
+      # ...and pass clean on the good fixtures (exit 0).
+      - name: Lint good fixtures (expect clean)
+        run: node src/index.mjs examples/tools.good.json --target anthropic,openai
