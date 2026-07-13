@@ -4,6 +4,15 @@ All notable changes to mcpconform are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-07-12
+
+Docs / packaging release — no behavior change; republished so the refreshed
+README (badges, a "lint in 30 seconds" quickstart, real example output, and a
+prominent npm link) reaches the npm package page.
+
+### Changed
+- README curb-appeal pass for public visibility.
+
 ## [0.2.0] - 2026-06-09
 
 ### Added
@@ -41,5 +50,6 @@ All notable changes to mcpconform are documented here. The format follows
   GitHub Action. Core MCP-spec rules, a parameterized `provider/*` rule family
   driven by `profiles/*.json`, and a live-server `inspect` mode (stdio handshake).
 
+[0.2.1]: https://github.com/cejor6/mcpconform/releases/tag/v0.2.1
 [0.2.0]: https://github.com/cejor6/mcpconform/releases/tag/v0.2.0
 [0.1.0]: https://github.com/cejor6/mcpconform/releases/tag/v0.1.0
