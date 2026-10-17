@@ -94,8 +94,8 @@
       "tier": "info",
       "appliesTo": "tool",
       "source": "tools spec (Recommended form for zero-param tools)",
-      "message": "Zero-parameter tools should use { type: object, additionalProperties: false }.",
-      "bad": "{}",
+      "message": "Zero-parameter tools (no properties, or properties: {}) should use { type: object, additionalProperties: false }.",
+      "bad": "{ \"type\": \"object\", \"properties\": {} }",
       "good": "{ \"type\": \"object\", \"additionalProperties\": false }"
     },
     {
@@ -157,7 +157,7 @@
       "tier": "warn",
       "appliesTo": "tool",
       "source": "schema.ts ToolAnnotations + tools spec (clients MUST treat annotations as untrusted)",
-      "message": "Mutating-verb tool name lacks annotations (destructiveHint defaults to TRUE; readOnly tools should say so).",
+      "message": "Mutating-verb tool name lacks annotations (destructiveHint defaults to TRUE; readOnly tools should say so). The verb is matched as a whole word: leading (delete_order, deleteOrder, delete) or trailing (order_delete).",
       "bad": "\"delete_order\" with no annotations",
       "good": "annotations: { \"destructiveHint\": true } (or readOnlyHint:true for queries)"
     },

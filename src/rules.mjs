@@ -8,9 +8,31 @@
 // Severity is resolved by the caller from rules.json + config overrides.
 
 import { checkProviderSchema } from "./schema.mjs";
+import { nameWords } from "./names.mjs";
 
-const MUTATING =
-  /^(delete|remove|drop|destroy|cancel|purge|reset|revoke|send|place|create|update|set|write|edit|move|rename)[_-]/i;
+// Mutating-verb detection on TOOL NAMES (never property names). The name is
+// split into words on _ - . and camelCase boundaries, and a verb must be a whole
+// word: a leading verb (delete_user, deleteUser, delete), or a trailing one
+// (user_delete) unless the name starts with a read verb (check_for_update).
+// "set"/"place" are leading-only: as a suffix they are usually nouns (data_set,
+// market_place). Whole-word matching keeps "updated"/"settings"/"reset_at"-style
+// words out ("updated" is not "update").
+const MUTATING_VERBS = new Set([
+  "delete", "remove", "drop", "destroy", "cancel", "purge", "reset", "revoke", "send", "place",
+  "create", "update", "set", "write", "edit", "move", "rename",
+]);
+const NOUNLIKE_SUFFIX = new Set(["set", "place"]);
+const READ_VERBS = new Set([
+  "get", "list", "read", "fetch", "find", "search", "query", "lookup", "describe", "show", "view",
+  "check", "is", "has", "can", "count", "preview", "validate", "watch", "inspect",
+]);
+export function isMutatingName(name) {
+  const w = nameWords(name);
+  if (!w.length) return false;
+  if (MUTATING_VERBS.has(w[0])) return true;
+  const last = w[w.length - 1];
+  return w.length > 1 && MUTATING_VERBS.has(last) && !NOUNLIKE_SUFFIX.has(last) && !READ_VERBS.has(w[0]);
+}
 
 // --- core (agnostic) -------------------------------------------------------
 export function runCoreRules(tools, emit) {
@@ -54,7 +76,7 @@ export function runCoreRules(tools, emit) {
       }
     }
 
-    if (typeof t.name === "string" && MUTATING.test(t.name)) {
+    if (typeof t.name === "string" && isMutatingName(t.name)) {
       const a = t.annotations;
       const ok = a && (typeof a.destructiveHint === "boolean" || a.readOnlyHint === true);
       if (!ok)
@@ -62,8 +84,10 @@ export function runCoreRules(tools, emit) {
           "Mutating-verb tool lacks annotations (destructiveHint defaults to TRUE).");
     }
 
-    // zero-parameter tool shape (info)
-    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && !s.properties && s.additionalProperties !== false)
+    // zero-parameter tool shape (info). `properties: {}` declares no parameters
+    // either, so without additionalProperties:false it still accepts any input.
+    const noProps = !s?.properties || (typeof s.properties === "object" && !Array.isArray(s.properties) && !Object.keys(s.properties).length);
+    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && noProps && s.additionalProperties !== false)
       emit("tool/no-params-shape", where, "Zero-parameter tool should set additionalProperties:false to accept only empty input.");
 
     // outputSchema root must be object

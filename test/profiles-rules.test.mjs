@@ -8,8 +8,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runCoreRules, runProviderRules } from "../src/rules.mjs";
+import { runCoreRules, runProviderRules, isMutatingName } from "../src/rules.mjs";
 import { validateInputSchema, runSchemaValidity } from "../src/schema.mjs";
+import { runServerJsonRules } from "../src/server-json.mjs";
+import { isSecretName } from "../src/secrets.mjs";
 import { loadProfileDir, loadAllProfiles, validateProfile, portableProfileIds, SHIPPED_PROFILES_DIR } from "../src/profiles.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
@@ -159,4 +161,42 @@ test("schema: 2000 tools validate quickly (one cached ajv per dialect)", () => {
   const ms = Date.now() - t0;
   assert.deepEqual(f, []);
   assert.ok(ms < 10000, `took ${ms}ms`); // ~2s locally; was ~30s with an Ajv per tool. Generous bound for slow CI.
+});
+
+// --- false positives / negatives -----------------------------------------------------
+
+test("secret names: whole-word match; MAX_TOKENS/TOKEN_LIMIT/AUTHOR are not secrets", () => {
+  for (const n of ["MAX_TOKENS", "TOKEN_LIMIT", "AUTHOR", "AUTHOR_NAME", "KEYBOARD_LAYOUT", "API_KEY_ID", "SECRET_PATH", "PUBLIC_KEY", "PASSWORD_MIN_LENGTH"])
+    assert.equal(isSecretName(n), false, n);
+  for (const n of ["API_KEY", "GITHUB_TOKEN", "apiKey", "DB_PASSWORD", "CLIENT_SECRET", "BASIC_AUTH", "PRIVATE_KEY", "APIKEY", "Authorization", "X-Api-Key"])
+    assert.equal(isSecretName(n), true, n);
+});
+
+test("server.json: env-secret-flag no longer fires on MAX_TOKENS / TOKEN_LIMIT / AUTHOR", () => {
+  const doc = {
+    name: "io.github.x/y",
+    version: "1.0.0",
+    packages: [{
+      registryType: "npm", identifier: "y", version: "1.0.0", transport: { type: "stdio" },
+      environmentVariables: [{ name: "MAX_TOKENS" }, { name: "TOKEN_LIMIT" }, { name: "AUTHOR" }, { name: "API_TOKEN" }],
+    }],
+  };
+  const f = [];
+  runServerJsonRules(doc, collectInto(f));
+  assert.deepEqual(f.filter((x) => x.id === "server-json/env-secret-flag").map((x) => x.tool), ["packages[0].env.API_TOKEN"]);
+});
+
+test("mutating verbs: camelCase, suffixed and bare verbs; not 'updated_at'-style words or read-verb names", () => {
+  for (const n of ["delete", "deleteUser", "user_delete", "delete_account", "HTTPDelete", "bulk-delete", "createIssue", "set_value"])
+    assert.equal(isMutatingName(n), true, n);
+  for (const n of ["updated_at", "get_updates", "check_for_update", "data_set", "market_place", "settings_get", "list_deleted"])
+    assert.equal(isMutatingName(n), false, n);
+  assert.ok(ids(core([{ name: "deleteUser", description: "d", inputSchema: { type: "object", additionalProperties: false } }])).includes("tool/destructive-needs-annotation"));
+});
+
+test("no-params-shape: properties:{} without additionalProperties:false is flagged; with it, not", () => {
+  const t = (s) => ({ name: "ping", description: "d", inputSchema: s });
+  assert.ok(ids(core([t({ type: "object", properties: {} })])).includes("tool/no-params-shape"));
+  assert.ok(!ids(core([t({ type: "object", properties: {}, additionalProperties: false })])).includes("tool/no-params-shape"));
+  assert.ok(!ids(core([t({ type: "object", properties: { a: { type: "string", description: "a" } } })])).includes("tool/no-params-shape"));
 });
