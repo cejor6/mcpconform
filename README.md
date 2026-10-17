@@ -110,9 +110,24 @@ Lint on every push and upload findings to the Security tab as SARIF:
     files: server.json .mcp.json
     targets: anthropic,openai
 - uses: github/codeql-action/upload-sarif@v4
+  if: always() # upload even when findings fail the mcpconform step
   with:
     sarif_file: ${{ steps.mcpconform.outputs.sarif }}
 ```
+
+The job needs `permissions: security-events: write` for the upload. Inputs:
+
+| input | default | notes |
+|-------|---------|-------|
+| `files` | (required) | space- or newline-separated paths to existing files, taken literally (no glob expansion, no CLI flags) |
+| `targets` | `""` | comma-separated profiles, e.g. `anthropic,openai` |
+| `mode` | `""` | `default` \| `strict` |
+| `min-severity` | `""` | `error` \| `warn` \| `info` (display filter; pass/fail is unaffected) |
+| `config` | `""` | config file path (default: `./mcpconform.config.json` if present) |
+| `fail-on-error` | `"true"` | `"false"` keeps the step green on findings once the SARIF is written; a missing `files`/`config` path, unwritable `output`, bad input, or crash still fails |
+| `output` | `mcpconform.sarif` | SARIF path, also exposed as the `sarif` output |
+
+Empty `targets` / `mode` / `min-severity` fall back to the config file, then the CLI defaults.
 
 ## Provider-agnostic architecture
 

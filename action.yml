@@ -5,16 +5,28 @@ branding:
   color: blue
 inputs:
   files:
-    description: Space- or newline-separated files to lint (tools/list dumps, server.json, client configs). Auto-detected by shape.
+    description: Space- or newline-separated files to lint (tools/list dumps, server.json, client configs). Auto-detected by shape. Paths are taken literally (no glob expansion).
     required: true
   targets:
-    description: Comma-separated provider profiles to check against (e.g. "anthropic,openai"). Empty = MCP-spec checks only.
+    description: Comma-separated provider profiles to check against (e.g. "anthropic,openai"). Empty = config file's targets, else MCP-spec checks only.
     required: false
     default: ""
   mode:
-    description: "default | strict"
+    description: "default | strict. Empty = config file's mode, else default."
     required: false
-    default: default
+    default: ""
+  min-severity:
+    description: "Report only findings at or above this tier: error | warn | info. Display filter only; the pass/fail result is unaffected. Empty = config file's minSeverity, else info."
+    required: false
+    default: ""
+  config:
+    description: Path to a mcpconform config file. Empty = ./mcpconform.config.json if present.
+    required: false
+    default: ""
+  fail-on-error:
+    description: '"true" fails the step when error-tier findings are found. "false" lets the step pass on findings once the SARIF is written; a missing file or config, an unwritable output, a bad input, or a crash still fails it.'
+    required: false
+    default: "true"
   output:
     description: SARIF output path.
     required: false
@@ -26,7 +38,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v7
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: "22"
     - name: Install mcpconform runtime deps
@@ -34,8 +46,74 @@ runs:
       run: npm ci --omit=dev --prefix "$GITHUB_ACTION_PATH"
     - name: Run mcpconform
       shell: bash
+      # Inputs are passed through env and only ever expanded as quoted shell
+      # variables -- never interpolated into the script text -- so an input value
+      # cannot inject shell syntax.
+      env:
+        MCPCONFORM_FILES: ${{ inputs.files }}
+        MCPCONFORM_TARGETS: ${{ inputs.targets }}
+        MCPCONFORM_MODE: ${{ inputs.mode }}
+        MCPCONFORM_MIN_SEVERITY: ${{ inputs.min-severity }}
+        MCPCONFORM_CONFIG: ${{ inputs.config }}
+        MCPCONFORM_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        MCPCONFORM_OUTPUT: ${{ inputs.output }}
       run: |
-        targets=""
-        if [ -n "${{ inputs.targets }}" ]; then targets="--target ${{ inputs.targets }}"; fi
-        node "$GITHUB_ACTION_PATH/src/index.mjs" ${{ inputs.files }} $targets \
-          --mode "${{ inputs.mode }}" --format sarif --out "${{ inputs.output }}"
+        set -euo pipefail
+        fail() { echo "::error::mcpconform: $1"; exit 2; }
+
+        fail_on_error="${MCPCONFORM_FAIL_ON_ERROR,,}"
+        case "$fail_on_error" in
+          true | false) ;;
+          *) fail "'fail-on-error' must be true or false" ;;
+        esac
+
+        # Split the whitespace-separated file list into an array with globbing off,
+        # so each entry is a literal path. CR is a separator too (CRLF workflow files).
+        set -f
+        files=()
+        IFS=$' \t\n\r' read -r -d '' -a files <<< "$MCPCONFORM_FILES" || true
+        set +f
+        if [ "${#files[@]}" -eq 0 ]; then fail "the 'files' input is empty"; fi
+        # Entries are positional file paths; refuse anything the CLI would parse as
+        # an option or as the 'inspect' subcommand (which spawns a process), and
+        # anything that is not an existing file (the CLI reports a missing file as
+        # an ordinary finding, which fail-on-error: false would otherwise swallow).
+        if [ "${files[0]}" = "inspect" ]; then
+          fail "'files' must list files to lint; the inspect subcommand is not supported by this action"
+        fi
+        for f in "${files[@]}"; do
+          case "$f" in
+            -*) fail "'files' entries must be paths, not options (an entry starts with '-')" ;;
+          esac
+          if [ ! -f "$f" ]; then fail "'files' entry is not an existing file: $f"; fi
+        done
+        # The CLI silently ignores a missing --config, so check it here.
+        if [ -n "$MCPCONFORM_CONFIG" ] && [ ! -f "$MCPCONFORM_CONFIG" ]; then
+          fail "'config' is not an existing file"
+        fi
+        out="$MCPCONFORM_OUTPUT"
+        if [ -z "$out" ]; then fail "'output' is empty"; fi
+        if [ -d "$out" ]; then fail "'output' is a directory"; fi
+        mkdir -p -- "$(dirname -- "$out")" || fail "cannot create the directory for 'output'"
+        # Remove any stale report so "SARIF was written" below means this run wrote it.
+        rm -f -- "$out" || fail "cannot replace 'output'"
+
+        args=("${files[@]}")
+        if [ -n "$MCPCONFORM_TARGETS" ]; then args+=(--target "$MCPCONFORM_TARGETS"); fi
+        if [ -n "$MCPCONFORM_MODE" ]; then args+=(--mode "$MCPCONFORM_MODE"); fi
+        if [ -n "$MCPCONFORM_MIN_SEVERITY" ]; then args+=(--min-severity "$MCPCONFORM_MIN_SEVERITY"); fi
+        if [ -n "$MCPCONFORM_CONFIG" ]; then args+=(--config "$MCPCONFORM_CONFIG"); fi
+        args+=(--format sarif --out "$out")
+
+        code=0
+        node "$GITHUB_ACTION_PATH/src/index.mjs" "${args[@]}" || code=$?
+        # Exit 1 = error-tier findings, but an uncaught crash also exits 1; only
+        # treat it as findings when this run actually wrote a non-empty SARIF.
+        if [ "$code" -eq 1 ] && [ "$fail_on_error" = "false" ]; then
+          if [ -s "$out" ]; then
+            echo "::warning::mcpconform found error-tier findings (fail-on-error is false, so the step passes)"
+            exit 0
+          fi
+          fail "exited 1 without writing a SARIF report (crash, not findings)"
+        fi
+        exit "$code"
