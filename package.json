@@ -7,7 +7,7 @@
     "mcpconform": "src/index.mjs"
   },
   "scripts": {
-    "test": "node --test --test-force-exit",
+    "test": "node --test",
     "lint:bad": "node src/index.mjs examples/tools.bad.json --target anthropic,openai",
     "lint:good": "node src/index.mjs examples/tools.good.json --target anthropic,openai",
     "lint:server": "node src/index.mjs examples/server.bad.json",
