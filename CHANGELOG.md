@@ -13,12 +13,23 @@ All notable changes to mcpconform are documented here. The format follows
 - Workflows and `action.yml` pin third-party actions to full commit SHAs.
 
 ### Added
-- GitHub Action inputs `min-severity`, `config`, and `fail-on-error`.
+- GitHub Action inputs `min-severity`, `config`, and `fail-on-error`
+  (`fail-on-error: false` only passes when the SARIF report was written).
+
+### Breaking (Action)
+Users on the floating `@v1` tag pick these up automatically:
+- `files` entries starting with `-` are refused, so CLI flags can no longer be
+  smuggled in through `files`. Use `portable: true` / `expand: true` in a config
+  file (via the `config` input) instead of `--portable` / `--expand`; `--type`
+  has no Action route now.
+- `files: "inspect -- <cmd>"` is refused; the Action lints files only.
+- `files` entries must be existing files, and a non-empty `config` must exist
+  (the CLI silently ignores a missing `--config`). Both now fail with exit 2.
+- `files` paths are no longer glob-expanded by the shell (never documented).
+- `mode` now defaults to empty, so a config file's `mode` is honored instead
+  of being overridden with `default`.
 
 ### Changed
-- GitHub Action: `files` paths are no longer glob-expanded by the shell (this
-  was never documented). `mode` now defaults to empty, so a config file's
-  `mode` is honored instead of being overridden with `default`.
 - README Action example uploads SARIF with `if: always()`, so findings that
   fail the step still reach code scanning.
 

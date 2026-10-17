@@ -119,12 +119,12 @@ The job needs `permissions: security-events: write` for the upload. Inputs:
 
 | input | default | notes |
 |-------|---------|-------|
-| `files` | (required) | space- or newline-separated paths, taken literally (no glob expansion) |
+| `files` | (required) | space- or newline-separated paths to existing files, taken literally (no glob expansion, no CLI flags) |
 | `targets` | `""` | comma-separated profiles, e.g. `anthropic,openai` |
 | `mode` | `""` | `default` \| `strict` |
 | `min-severity` | `""` | `error` \| `warn` \| `info` (display filter; pass/fail is unaffected) |
 | `config` | `""` | config file path (default: `./mcpconform.config.json` if present) |
-| `fail-on-error` | `"true"` | `"false"` keeps the step green on findings (SARIF is still written; usage errors still fail) |
+| `fail-on-error` | `"true"` | `"false"` keeps the step green on findings once the SARIF is written; a missing `files`/`config` path, unwritable `output`, bad input, or crash still fails |
 | `output` | `mcpconform.sarif` | SARIF path, also exposed as the `sarif` output |
 
 Empty `targets` / `mode` / `min-severity` fall back to the config file, then the CLI defaults.

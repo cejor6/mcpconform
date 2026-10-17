@@ -24,7 +24,7 @@ inputs:
     required: false
     default: ""
   fail-on-error:
-    description: '"true" fails the step when error-tier findings are found. "false" still writes the SARIF but lets the step pass on findings (usage/config errors still fail).'
+    description: '"true" fails the step when error-tier findings are found. "false" lets the step pass on findings once the SARIF is written; a missing file or config, an unwritable output, a bad input, or a crash still fails it.'
     required: false
     default: "true"
   output:
@@ -59,40 +59,61 @@ runs:
         MCPCONFORM_OUTPUT: ${{ inputs.output }}
       run: |
         set -euo pipefail
+        fail() { echo "::error::mcpconform: $1"; exit 2; }
+
+        fail_on_error="${MCPCONFORM_FAIL_ON_ERROR,,}"
+        case "$fail_on_error" in
+          true | false) ;;
+          *) fail "'fail-on-error' must be true or false" ;;
+        esac
+
         # Split the whitespace-separated file list into an array with globbing off,
-        # so each entry is a literal path.
+        # so each entry is a literal path. CR is a separator too (CRLF workflow files).
         set -f
         files=()
-        read -r -d '' -a files <<< "$MCPCONFORM_FILES" || true
+        IFS=$' \t\n\r' read -r -d '' -a files <<< "$MCPCONFORM_FILES" || true
         set +f
-        if [ "${#files[@]}" -eq 0 ]; then
-          echo "::error::mcpconform: the 'files' input is empty"
-          exit 2
-        fi
+        if [ "${#files[@]}" -eq 0 ]; then fail "the 'files' input is empty"; fi
         # Entries are positional file paths; refuse anything the CLI would parse as
-        # an option or as the 'inspect' subcommand (which spawns a process).
+        # an option or as the 'inspect' subcommand (which spawns a process), and
+        # anything that is not an existing file (the CLI reports a missing file as
+        # an ordinary finding, which fail-on-error: false would otherwise swallow).
+        if [ "${files[0]}" = "inspect" ]; then
+          fail "'files' must list files to lint; the inspect subcommand is not supported by this action"
+        fi
         for f in "${files[@]}"; do
           case "$f" in
-            -*) echo "::error::mcpconform: 'files' entries must be paths, not options (an entry starts with '-')"; exit 2 ;;
+            -*) fail "'files' entries must be paths, not options (an entry starts with '-')" ;;
           esac
+          if [ ! -f "$f" ]; then fail "'files' entry is not an existing file: $f"; fi
         done
-        if [ "${files[0]}" = "inspect" ]; then
-          echo "::error::mcpconform: 'files' must list files to lint; the inspect subcommand is not supported by this action"
-          exit 2
+        # The CLI silently ignores a missing --config, so check it here.
+        if [ -n "$MCPCONFORM_CONFIG" ] && [ ! -f "$MCPCONFORM_CONFIG" ]; then
+          fail "'config' is not an existing file"
         fi
+        out="$MCPCONFORM_OUTPUT"
+        if [ -z "$out" ]; then fail "'output' is empty"; fi
+        if [ -d "$out" ]; then fail "'output' is a directory"; fi
+        mkdir -p -- "$(dirname -- "$out")" || fail "cannot create the directory for 'output'"
+        # Remove any stale report so "SARIF was written" below means this run wrote it.
+        rm -f -- "$out" || fail "cannot replace 'output'"
 
         args=("${files[@]}")
         if [ -n "$MCPCONFORM_TARGETS" ]; then args+=(--target "$MCPCONFORM_TARGETS"); fi
         if [ -n "$MCPCONFORM_MODE" ]; then args+=(--mode "$MCPCONFORM_MODE"); fi
         if [ -n "$MCPCONFORM_MIN_SEVERITY" ]; then args+=(--min-severity "$MCPCONFORM_MIN_SEVERITY"); fi
         if [ -n "$MCPCONFORM_CONFIG" ]; then args+=(--config "$MCPCONFORM_CONFIG"); fi
-        args+=(--format sarif --out "$MCPCONFORM_OUTPUT")
+        args+=(--format sarif --out "$out")
 
         code=0
         node "$GITHUB_ACTION_PATH/src/index.mjs" "${args[@]}" || code=$?
-        # Exit 1 = error-tier findings; anything else non-zero is a usage/config error.
-        if [ "$code" -eq 1 ] && [ "$MCPCONFORM_FAIL_ON_ERROR" = "false" ]; then
-          echo "::warning::mcpconform found error-tier findings (fail-on-error is false, so the step passes)"
-          exit 0
+        # Exit 1 = error-tier findings, but an uncaught crash also exits 1; only
+        # treat it as findings when this run actually wrote a non-empty SARIF.
+        if [ "$code" -eq 1 ] && [ "$fail_on_error" = "false" ]; then
+          if [ -s "$out" ]; then
+            echo "::warning::mcpconform found error-tier findings (fail-on-error is false, so the step passes)"
+            exit 0
+          fi
+          fail "exited 1 without writing a SARIF report (crash, not findings)"
         fi
         exit "$code"
