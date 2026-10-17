@@ -4,6 +4,24 @@ All notable changes to mcpconform are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- GitHub Action: inputs are passed to the run step via `env` instead of being
+  interpolated into the script, closing a script-injection hole. `files`
+  entries starting with `-`, or a leading `inspect`, are rejected.
+- Workflows and `action.yml` pin third-party actions to full commit SHAs.
+
+### Added
+- GitHub Action inputs `min-severity`, `config`, and `fail-on-error`.
+
+### Changed
+- GitHub Action: `files` paths are no longer glob-expanded by the shell (this
+  was never documented). `mode` now defaults to empty, so a config file's
+  `mode` is honored instead of being overridden with `default`.
+- README Action example uploads SARIF with `if: always()`, so findings that
+  fail the step still reach code scanning.
+
 ## [0.2.1] - 2026-07-12
 
 Docs / packaging release — no behavior change; republished so the refreshed
