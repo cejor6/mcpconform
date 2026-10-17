@@ -54,11 +54,13 @@ export function validateProfile(profile) {
 
 /**
  * Load + validate every *.json profile in a directory (profile.schema.json is
- * skipped). Throws ProfileError on unparsable JSON, a schema violation, or two
- * files in the same directory declaring the same id.
- * Returns { [id]: { profile, file } }.
+ * skipped). A JSON file that isn't a profile at all (not an object, or no
+ * `id` — e.g. a package.json kept alongside) is skipped with a warning pushed
+ * onto `warnings`. Throws ProfileError on unparsable JSON, a schema violation
+ * in anything that is a profile, or two files in one directory declaring the
+ * same id. Returns { [id]: { profile, file } }.
  */
-export function loadProfileDir(dir) {
+export function loadProfileDir(dir, warnings = []) {
   const out = {};
   let entries;
   try {
@@ -74,6 +76,10 @@ export function loadProfileDir(dir) {
       profile = JSON.parse(readFileSync(file, "utf8"));
     } catch (e) {
       throw new ProfileError(`invalid profile ${file}: cannot parse JSON: ${e.message}`);
+    }
+    if (!profile || typeof profile !== "object" || Array.isArray(profile) || profile.id === undefined) {
+      warnings.push(`skipping ${file}: not a profile (no "id")`);
+      continue;
     }
     const problems = validateProfile(profile);
     if (problems.length)
@@ -92,13 +98,16 @@ export function loadProfileDir(dir) {
  * Returns { profiles: { [id]: profile }, warnings: string[] }.
  */
 export function loadAllProfiles(extraDir = null, shippedDir = SHIPPED_PROFILES_DIR) {
-  const shipped = loadProfileDir(shippedDir);
-  const profiles = Object.fromEntries(Object.entries(shipped).map(([id, x]) => [id, x.profile]));
   const warnings = [];
+  const shipped = loadProfileDir(shippedDir, warnings);
+  const profiles = Object.fromEntries(Object.entries(shipped).map(([id, x]) => [id, x.profile]));
   if (extraDir)
-    for (const [id, { profile, file }] of Object.entries(loadProfileDir(extraDir))) {
-      if (shipped[id] && shipped[id].file !== file)
+    for (const [id, { profile, file }] of Object.entries(loadProfileDir(extraDir, warnings))) {
+      if (shipped[id] && shipped[id].file !== file) {
         warnings.push(`profile "${id}" from ${file} overrides the shipped profile of the same id`);
+        if (profile.verified !== true && shipped[id].profile.verified === true)
+          warnings.push(`profile "${id}" from ${file} is verified:false, so it is excluded from --portable`);
+      }
       profiles[id] = profile;
     }
   return { profiles, warnings };

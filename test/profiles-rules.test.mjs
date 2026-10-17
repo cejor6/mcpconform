@@ -86,6 +86,33 @@ test("profiles: a profilesDir profile overriding a shipped id warns (and wins)",
   });
 });
 
+test("profiles: _comment keys are allowed; non-profile JSON in profilesDir is skipped with a warning", () => {
+  const custom = { _comment: "mine", id: "my-host", kind: "mcp-host", verified: false, toolName: { _why: "doc", pattern: "^[a-z_]+$" } };
+  withProfilesDir({ "my-host.json": custom, "package.json": { name: "x", version: "1.0.0" } }, (cfg, dir) => {
+    const { profiles, warnings } = loadAllProfiles(dir);
+    assert.ok(profiles["my-host"]);
+    assert.ok(warnings.some((w) => /package\.json: not a profile/.test(w)));
+    const r = cli(["examples/tools.good.json", "--config", cfg, "--target", "my-host"]);
+    assert.equal(r.code, 0);
+    assert.match(r.stderr, /skipping .*package\.json/);
+  });
+});
+
+test("profiles: still rejects a profile missing kind/verified (documented as breaking)", () => {
+  withProfilesDir({ "half.json": { id: "half" } }, (cfg) => {
+    assert.equal(cli(["examples/tools.good.json", "--config", cfg]).code, 2);
+  });
+});
+
+test("profiles: overriding a verified shipped id with verified:false warns it leaves --portable", () => {
+  const custom = { ...profile("openai"), verified: false };
+  withProfilesDir({ "openai.json": custom }, (cfg, dir) => {
+    const { profiles, warnings } = loadAllProfiles(dir);
+    assert.ok(warnings.some((w) => /"openai" .*excluded from --portable/.test(w)));
+    assert.ok(!portableProfileIds(profiles).includes("openai"));
+  });
+});
+
 test("profiles: pointing profilesDir at the shipped directory is not an override", () => {
   assert.deepEqual(loadAllProfiles(SHIPPED_PROFILES_DIR).warnings, []);
 });

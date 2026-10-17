@@ -6,6 +6,7 @@
   "type": "object",
   "required": ["id", "kind", "verified"],
   "additionalProperties": false,
+  "patternProperties": { "^_": { "description": "Keys starting with _ are free-form comments (e.g. _comment), ignored by the engine." } },
   "properties": {
     "$schema": { "type": "string" },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
@@ -25,6 +26,7 @@
     "toolName": {
       "type": "object",
       "additionalProperties": false,
+      "patternProperties": { "^_": {} },
       "properties": {
         "pattern": { "type": "string", "description": "ECMA regex the full tool name must match." },
         "maxLength": { "type": ["integer", "null"] },
@@ -38,11 +40,13 @@
     "toolDescription": {
       "type": "object",
       "additionalProperties": false,
+      "patternProperties": { "^_": {} },
       "properties": { "maxLength": { "type": ["integer", "null"], "description": "null = no documented cap." } }
     },
     "tools": {
       "type": "object",
       "additionalProperties": false,
+      "patternProperties": { "^_": {} },
       "properties": {
         "maxCount": { "type": ["integer", "null"], "description": "Max number of tool definitions accepted in one request." },
         "maxTotalBytes": { "type": ["integer", "null"], "description": "Budget on the serialized tool set, if the consumer documents one." }
@@ -51,6 +55,7 @@
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
+      "patternProperties": { "^_": {} },
       "properties": {
         "dialect": { "enum": ["draft-2020-12", "draft-07", "openapi-3.0", "subset"] },
         "rootMustBeObject": {
@@ -99,6 +104,7 @@
     "strict": {
       "type": "object",
       "additionalProperties": false,
+      "patternProperties": { "^_": {} },
       "description": "Extra constraints that apply ONLY when the consumer's strict / structured-output mode is enabled for this target (config: mode='strict').",
       "properties": {
         "requiresAdditionalPropertiesFalse": { "type": "boolean" },
