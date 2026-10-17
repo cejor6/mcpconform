@@ -6,6 +6,35 @@ All notable changes to mcpconform are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- GitHub Action: inputs are passed to the run step via `env` instead of being
+  interpolated into the script, closing a script-injection hole. `files`
+  entries starting with `-`, or a leading `inspect`, are rejected.
+- Workflows and `action.yml` pin third-party actions to full commit SHAs.
+
+### Added
+- GitHub Action inputs `min-severity`, `config`, and `fail-on-error`
+  (`fail-on-error: false` only passes when the SARIF report was written).
+- Profiles (shipped and from `profilesDir`) are validated against `profile.schema.json` on load; an invalid one exits 2 naming the file, and a `profilesDir` profile overriding a shipped id warns.
+- Previously documented but unimplemented checks: `inputSchema.allowsRecursion`, `maxProperties` (new `provider/schema-max-properties`), `supportedStringFormats` (strict mode), `toolName.caseSensitive` (new `provider/name-case-collision`), `idempotentHint:false` + `readOnlyHint:true` in `tool/annotations-consistency`, and a long-hex pattern in `client-config/no-hardcoded-secrets`.
+
+### Breaking (Action)
+Users on the floating `@v1` tag pick these up automatically:
+- `files` entries starting with `-` are refused, so CLI flags can no longer be
+  smuggled in through `files`. Use `portable: true` / `expand: true` in a config
+  file (via the `config` input) instead of `--portable` / `--expand`; `--type`
+  has no Action route now.
+- `files: "inspect -- <cmd>"` is refused; the Action lints files only.
+- `files` entries must be existing files, and a non-empty `config` must exist
+  (the CLI silently ignores a missing `--config`). Both now fail with exit 2.
+- `files` paths are no longer glob-expanded by the shell (never documented).
+- `mode` now defaults to empty, so a config file's `mode` is honored instead
+  of being overridden with `default`.
+
+### Changed
+- README Action example uploads SARIF with `if: always()`, so findings that
+  fail the step still reach code scanning.
+
 ### Fixed
 - `generic-strict` was unsatisfiable: its keyword allowlist omitted `additionalProperties` (which its own strict block requires) and `title`, so even `examples/tools.good.json` failed it.
 - `--portable` now checks every **verified** profile, including `generic-strict`; the unverified `mistral` stub is no longer included (previously the reverse).
@@ -14,10 +43,6 @@ All notable changes to mcpconform are documented here. The format follows
 - `server-json/env-secret-flag` no longer fires on `MAX_TOKENS`, `TOKEN_LIMIT`, `AUTHOR`, …: secret words now match as whole words.
 - `tool/destructive-needs-annotation` also catches camelCase (`deleteUser`), suffixed (`user_delete`) and bare (`delete`) verbs.
 - `tool/no-params-shape` also flags `{ "type": "object", "properties": {} }` without `additionalProperties: false`.
-
-### Added
-- Profiles (shipped and from `profilesDir`) are validated against `profile.schema.json` on load; an invalid one exits 2 naming the file, and a `profilesDir` profile overriding a shipped id warns.
-- Previously documented but unimplemented checks: `inputSchema.allowsRecursion`, `maxProperties` (new `provider/schema-max-properties`), `supportedStringFormats` (strict mode), `toolName.caseSensitive` (new `provider/name-case-collision`), `idempotentHint:false` + `readOnlyHint:true` in `tool/annotations-consistency`, and a long-hex pattern in `client-config/no-hardcoded-secrets`.
 
 ### Removed
 - `client-config/valid-json` from `rules.json` (it was never emitted; parse failures are `meta/parse-error`). `inputSchema.rootMustBeObject` is deprecated and ignored (the core `tool/input-schema-root-object` rule already enforces it).
