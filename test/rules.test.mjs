@@ -897,7 +897,8 @@ test("cli inspect: a server that closes its stdin fails cleanly (no unhandled EP
 });
 
 test("cli inspect: the report never echoes the spawned command's arguments", () => {
-  const secret = "sk-live-0123456789abcdefSECRET";
+  // Assembled at runtime so secret scanners don't flag this deliberately fake key.
+  const secret = ["sk", "live", "0123456789abcdef" + "SECRET"].join("-");
   const human = rrun(["inspect", "--", process.execPath, mock, `--api-key=${secret}`]);
   assert.equal(human.code, 0);
   assert.doesNotMatch(human.out, /SECRET/);

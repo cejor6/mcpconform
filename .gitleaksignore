@@ -1,0 +1,3 @@
+# Deliberately fake API key in a test fixture (commit ecebf47, before it was
+# rewritten to be assembled at runtime). Fingerprint format: commit:file:rule:line
+ecebf4759310fae7adebae62f79df72ac676f9df:test/rules.test.mjs:generic-api-key:779
