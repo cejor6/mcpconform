@@ -28,7 +28,11 @@
       "properties": {
         "pattern": { "type": "string", "description": "ECMA regex the full tool name must match." },
         "maxLength": { "type": ["integer", "null"] },
-        "caseSensitive": { "type": "boolean", "default": true }
+        "caseSensitive": {
+          "type": "boolean",
+          "default": true,
+          "description": "false = the consumer matches tool names case-insensitively, so names that differ only by case collide (provider/name-case-collision)."
+        }
       }
     },
     "toolDescription": {
@@ -49,7 +53,11 @@
       "additionalProperties": false,
       "properties": {
         "dialect": { "enum": ["draft-2020-12", "draft-07", "openapi-3.0", "subset"] },
-        "rootMustBeObject": { "type": "boolean" },
+        "rootMustBeObject": {
+          "type": "boolean",
+          "deprecated": true,
+          "description": "Deprecated and ignored: the MCP spec already requires an object root, which the core rule tool/input-schema-root-object enforces for every target. Accepted only so existing custom profiles still validate."
+        },
         "supportedKeywords": {
           "type": "array",
           "items": { "type": "string" },
@@ -70,12 +78,22 @@
           "items": { "type": "string" },
           "description": "Keywords the consumer silently drops with no error (e.g. additionalProperties/default on Gemini). Flagged at info, never error — distinguishes 'harmlessly ignored' from 'rejected'."
         },
-        "supportedStringFormats": { "type": "array", "items": { "type": "string" } },
+        "supportedStringFormats": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "`format` values the consumer honors in strict mode. When strict.rejectsUnenforcedKeywords is true, `format` with one of these values is accepted in strict mode and any other value is rejected (provider/schema-unsupported-keyword). Default mode is unaffected."
+        },
         "allowsRefs": { "type": "boolean" },
-        "allowsRecursion": { "type": "boolean" },
+        "allowsRecursion": {
+          "type": "boolean",
+          "description": "false = recursive schemas (a $ref to \"#\", $dynamicRef/$recursiveRef, or a cycle among local $defs) are rejected (provider/schema-no-refs). Checked only when allowsRefs is not false — without $ref there is no recursion."
+        },
         "allowsAnyOf": { "type": "boolean" },
         "maxNestingDepth": { "type": ["integer", "null"] },
-        "maxProperties": { "type": ["integer", "null"] }
+        "maxProperties": {
+          "type": ["integer", "null"],
+          "description": "Max total object properties, summed over every object in the schema (provider/schema-max-properties)."
+        }
       }
     },
     "strict": {
@@ -87,7 +105,10 @@
         "requiresAllPropertiesRequired": { "type": "boolean" },
         "rejectsUnenforcedKeywords": { "type": "boolean" },
         "maxNestingDepth": { "type": ["integer", "null"] },
-        "maxProperties": { "type": ["integer", "null"] }
+        "maxProperties": {
+          "type": ["integer", "null"],
+          "description": "Strict-mode max total object properties, summed over every object in the schema (provider/schema-max-properties)."
+        }
       }
     }
   },

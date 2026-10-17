@@ -1,6 +1,8 @@
 // Rules for client config files (.mcp.json / claude_desktop_config.json / mcpServers).
 // No MCP spec governs this shape, so these encode the cross-client conventions.
 
+import { looksHexSecret } from "./secrets.mjs";
+
 const SECRET = [
   /\bsk-[A-Za-z0-9_-]{16,}/,
   /\bghp_[A-Za-z0-9]{20,}/,
@@ -78,13 +80,13 @@ export function runClientConfigRules(doc, emit) {
       for (const [k, v] of Object.entries(cfg.env)) {
         if (typeof v !== "string")
           emit("client-config/env-values-strings", `${name}.env.${k}`, `env value must be a string (got ${typeof v}).`);
-        if (looksSecret(v))
+        if (looksSecret(v) || looksHexSecret(k, v))
           emit("client-config/no-hardcoded-secrets", `${name}.env.${k}`, "Looks like a hardcoded secret; reference an env var instead.");
       }
 
     if (cfg.headers && typeof cfg.headers === "object")
       for (const [k, v] of Object.entries(cfg.headers))
-        if (looksSecret(v))
+        if (looksSecret(v) || looksHexSecret(k, v))
           emit("client-config/no-hardcoded-secrets", `${name}.headers.${k}`, "Looks like a hardcoded secret in headers; use an env var reference.");
 
     if (hasUrl && /^http:\/\//i.test(cfg.url))

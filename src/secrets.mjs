@@ -30,3 +30,9 @@ export function isSecretName(name) {
   if (w.some((x) => NON_SECRET_WORDS.has(x))) return false;
   return !NON_SECRET_LAST.has(w[w.length - 1]);
 }
+
+// A long run of hex is only treated as a secret when the NAME also looks
+// secret-ish — a bare hex value is as likely a commit SHA, digest, or id.
+// The value must be entirely hex (optionally behind a Bearer/token scheme).
+const LONG_HEX = /^(?:(?:bearer|token)\s+)?[0-9a-f]{32,}$/i;
+export const looksHexSecret = (name, value) => typeof value === "string" && LONG_HEX.test(value.trim()) && isSecretName(name);

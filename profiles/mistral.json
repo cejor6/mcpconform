@@ -7,5 +7,5 @@
   "notes": "STUB — constraints not yet sourced from Mistral's docs. This file exists to demonstrate the extension pattern: any contributor can drop a profile here. Findings that rely on it are flagged by meta/profile-unverified until verified:true. To verify: fill toolName.pattern, toolName.maxLength, toolDescription.maxLength, and the inputSchema block from https://docs.mistral.ai/capabilities/function_calling/, then add `source` + `lastVerified` and flip `verified` to true.",
   "toolName": { "pattern": "^[a-zA-Z0-9_-]{1,64}$", "maxLength": 64 },
   "toolDescription": { "maxLength": null },
-  "inputSchema": { "dialect": "subset", "rootMustBeObject": true }
+  "inputSchema": { "dialect": "subset" }
 }

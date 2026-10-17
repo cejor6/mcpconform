@@ -148,6 +148,12 @@ export function checkProviderSchema(toolName, schema, profile, mode, emit) {
   const ignored = new Set(is.ignoredKeywords || []);
   const unenforced = new Set(is.unenforcedKeywords || []);
 
+  // supportedStringFormats: the `format` values the consumer honors under strict
+  // mode. A strict mode that rejects unenforced keywords still accepts `format`
+  // when its value is one of these; any other value is rejected.
+  const formats = Array.isArray(is.supportedStringFormats) ? new Set(is.supportedStringFormats) : null;
+  const strictRejects = strict && sp.rejectsUnenforcedKeywords;
+
   for (const kw of keywords) {
     if (META_OK.has(kw)) continue;
     const allowlistMiss = !!supported && !supported.has(kw);
@@ -155,6 +161,11 @@ export function checkProviderSchema(toolName, schema, profile, mode, emit) {
 
     if (denied.has(kw) || (allowlistMiss && !cosmetic)) {
       emit("provider/schema-unsupported-keyword", toolName, `inputSchema uses "${kw}" which ${pid} does not support`, pid);
+    } else if (kw === "format" && formats && strictRejects) {
+      const bad = new Set(subs.map((x) => x.schema.format).filter((v) => typeof v === "string" && !formats.has(v)));
+      for (const v of bad)
+        emit("provider/schema-unsupported-keyword", toolName,
+          `inputSchema uses format "${v}" which ${pid} rejects in strict mode (supported: ${[...formats].join(", ")})`, pid);
     } else if (cosmetic) {
       if (strict && sp.rejectsUnenforcedKeywords && unenforced.has(kw))
         emit("provider/schema-unsupported-keyword", toolName, `inputSchema uses "${kw}" which ${pid} rejects in strict mode`, pid);
@@ -169,6 +180,10 @@ export function checkProviderSchema(toolName, schema, profile, mode, emit) {
       emit("provider/schema-no-refs", toolName, `${pid} does not support $ref; inline the definition`, pid);
     if (is.allowsAnyOf === false && keywords.has("anyOf"))
       emit("provider/schema-no-refs", toolName, `${pid} does not support anyOf`, pid);
+    // Recursion is only reachable through $ref, so it's checked only when $ref
+    // itself is allowed (otherwise the $ref finding above already covers it).
+    if (is.allowsRecursion === false && is.allowsRefs !== false && isRecursive(schema, subs))
+      emit("provider/schema-no-refs", toolName, `${pid} does not support recursive schemas; bound the nesting explicitly`, pid);
   }
 
   // strict-mode structural requirements
@@ -194,4 +209,51 @@ export function checkProviderSchema(toolName, schema, profile, mode, emit) {
     if (deepest > maxDepth)
       emit("provider/schema-max-depth", toolName, `inputSchema nests ${deepest} deep; ${pid} max is ${maxDepth}`, pid);
   }
+
+  // max total object properties (summed over every object in the schema)
+  const maxProps = (strict && sp.maxProperties) || is.maxProperties;
+  if (maxProps) {
+    let total = 0;
+    for (const { schema: s } of subs)
+      if (s.properties && typeof s.properties === "object" && !Array.isArray(s.properties)) total += Object.keys(s.properties).length;
+    if (total > maxProps)
+      emit("provider/schema-max-properties", toolName, `inputSchema declares ${total} object properties in total; ${pid} max is ${maxProps}`, pid);
+  }
+}
+
+// True when the schema can recurse: a $ref to the root ("#"), a
+// $recursiveRef/$dynamicRef, or a cycle among the root's $defs/definitions.
+// Best-effort over local refs only; external refs are not resolved.
+function isRecursive(root, subs) {
+  for (const { schema: s } of subs)
+    if (s.$ref === "#" || s.$recursiveRef !== undefined || s.$dynamicRef !== undefined) return true;
+  const defs = new Map();
+  for (const d of ["$defs", "definitions"])
+    if (root[d] && typeof root[d] === "object" && !Array.isArray(root[d]))
+      for (const [k, v] of Object.entries(root[d])) defs.set(`${d}/${k}`, v);
+  if (!defs.size) return false;
+  const target = (ref) => {
+    if (typeof ref !== "string" || !ref.startsWith("#/")) return null;
+    let key;
+    try {
+      key = decodeURIComponent(ref.slice(2)).replace(/~1/g, "/").replace(/~0/g, "~");
+    } catch {
+      return null;
+    }
+    return defs.has(key) ? key : null;
+  };
+  const edges = new Map();
+  for (const [k, v] of defs)
+    edges.set(k, collect(v, 0, []).map((x) => target(x.schema.$ref)).filter(Boolean));
+  const state = new Map(); // 1 = on the DFS stack, 2 = done
+  const cyclic = (k) => {
+    if (state.get(k) === 1) return true;
+    if (state.get(k) === 2) return false;
+    state.set(k, 1);
+    for (const n of edges.get(k)) if (cyclic(n)) return true;
+    state.set(k, 2);
+    return false;
+  };
+  for (const k of defs.keys()) if (cyclic(k)) return true;
+  return false;
 }

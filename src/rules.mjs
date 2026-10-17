@@ -109,8 +109,14 @@ export function runCoreRules(tools, emit) {
     }
 
     // annotation consistency
+    // Per the spec, destructiveHint and idempotentHint are meaningful only when
+    // readOnlyHint is false. Flag the value that contradicts readOnlyHint:true:
+    // destructive, or NON-idempotent (a tool with no effects is trivially idempotent).
     if (t.annotations && t.annotations.readOnlyHint === true && t.annotations.destructiveHint === true)
       emit("tool/annotations-consistency", where, "destructiveHint is meaningful only when readOnlyHint is false.");
+    if (t.annotations && t.annotations.readOnlyHint === true && t.annotations.idempotentHint === false)
+      emit("tool/annotations-consistency", where,
+        "idempotentHint:false contradicts readOnlyHint:true; idempotentHint is meaningful only when readOnlyHint is false.");
 
     // redundant title
     if (typeof t.title === "string" && t.title === t.name)
@@ -162,6 +168,20 @@ export function runProviderRules(tools, profiles, emit, mode = "default") {
     for (const t of tools) {
       if (t && typeof t === "object" && t.inputSchema && typeof t.inputSchema === "object" && !Array.isArray(t.inputSchema))
         checkProviderSchema(typeof t.name === "string" ? t.name : null, t.inputSchema, p, mode, emit);
+    }
+
+    // A consumer that matches tool names case-insensitively can't tell
+    // "Search" from "search": flag names that differ only by case.
+    if (tn.caseSensitive === false) {
+      const byFold = new Map();
+      for (const t of tools)
+        if (t && typeof t.name === "string") {
+          const k = t.name.toLowerCase();
+          const prev = byFold.get(k);
+          if (prev !== undefined && prev !== t.name)
+            emit("provider/name-case-collision", t.name, `name collides with "${prev}" on ${p.id}, which compares tool names case-insensitively`, p.id);
+          else if (prev === undefined) byFold.set(k, t.name);
+        }
     }
 
     if (p.tools && p.tools.maxCount && tools.length > p.tools.maxCount)

@@ -9,10 +9,12 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runCoreRules, runProviderRules, isMutatingName } from "../src/rules.mjs";
-import { validateInputSchema, runSchemaValidity } from "../src/schema.mjs";
+import { validateInputSchema, runSchemaValidity, checkProviderSchema } from "../src/schema.mjs";
 import { runServerJsonRules } from "../src/server-json.mjs";
-import { isSecretName } from "../src/secrets.mjs";
+import { runClientConfigRules } from "../src/client-config.mjs";
+import { isSecretName, looksHexSecret } from "../src/secrets.mjs";
 import { loadProfileDir, loadAllProfiles, validateProfile, portableProfileIds, SHIPPED_PROFILES_DIR } from "../src/profiles.mjs";
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
 const collectInto = (f) => (id, tool, message, pid = null) => f.push({ id, tool, message, pid });
@@ -23,6 +25,7 @@ function cli(a, opts = {}) {
   const r = spawnSync(process.execPath, [join(ROOT, "src/index.mjs"), ...a], { encoding: "utf8", cwd: ROOT, ...opts });
   return { code: r.status, stdout: r.stdout || "", stderr: r.stderr || "", out: (r.stdout || "") + (r.stderr || "") };
 }
+const ruleIds = new Set(JSON.parse(readFileSync(join(ROOT, "rules.json"), "utf8")).rules.map((r) => r.id));
 
 // --- profiles: validation + loading ------------------------------------------
 
@@ -199,4 +202,80 @@ test("no-params-shape: properties:{} without additionalProperties:false is flagg
   assert.ok(ids(core([t({ type: "object", properties: {} })])).includes("tool/no-params-shape"));
   assert.ok(!ids(core([t({ type: "object", properties: {}, additionalProperties: false })])).includes("tool/no-params-shape"));
   assert.ok(!ids(core([t({ type: "object", properties: { a: { type: "string", description: "a" } } })])).includes("tool/no-params-shape"));
+});
+
+// --- rule claims now implemented ---------------------------------------------------
+
+const syntheticProfile = (extra) => ({ id: "test-consumer", kind: "synthetic", verified: false, ...extra });
+const pschema = (schema, p, mode = "default") => {
+  const f = [];
+  checkProviderSchema("t", schema, p, mode, collectInto(f));
+  return f;
+};
+
+test("provider: allowsRecursion:false flags $ref '#' and $defs cycles, not acyclic refs", () => {
+  const p = syntheticProfile({ inputSchema: { allowsRefs: true, allowsRecursion: false } });
+  const selfRef = { type: "object", properties: { child: { $ref: "#" } } };
+  const cycle = {
+    type: "object",
+    properties: { n: { $ref: "#/$defs/node" } },
+    $defs: { node: { type: "object", properties: { next: { $ref: "#/$defs/node" } } } },
+  };
+  const acyclic = { type: "object", properties: { n: { $ref: "#/$defs/leaf" } }, $defs: { leaf: { type: "string" } } };
+  assert.deepEqual(ids(pschema(selfRef, p)), ["provider/schema-no-refs"]);
+  assert.deepEqual(ids(pschema(cycle, p)), ["provider/schema-no-refs"]);
+  assert.deepEqual(pschema(acyclic, p), []);
+  // allowsRecursion:true (or unset) -> inert
+  assert.deepEqual(pschema(cycle, syntheticProfile({ inputSchema: { allowsRefs: true } })), []);
+});
+
+test("provider: strict.maxProperties counts properties across nested objects", () => {
+  const props = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`p${i}`, { type: "string" }]));
+  const schema = { type: "object", properties: { ...props(60), nested: { type: "object", properties: props(50) } } };
+  const p = syntheticProfile({ strict: { maxProperties: 100 } });
+  assert.deepEqual(ids(pschema(schema, p, "strict")), ["provider/schema-max-properties"]);
+  assert.deepEqual(pschema(schema, p, "default"), []); // strict-only cap
+  assert.deepEqual(ids(pschema(schema, syntheticProfile({ inputSchema: { maxProperties: 100 } }))), ["provider/schema-max-properties"]);
+});
+
+test("provider: supportedStringFormats — strict mode accepts listed formats, rejects others", () => {
+  const a = profile("anthropic");
+  const fmt = (f) => ({ type: "object", properties: { x: { type: "string", format: f } }, additionalProperties: false });
+  assert.deepEqual(pschema(fmt("email"), a, "strict"), []);
+  const bad = pschema(fmt("credit-card"), a, "strict");
+  assert.deepEqual(ids(bad), ["provider/schema-unsupported-keyword"]);
+  assert.match(bad[0].message, /credit-card/);
+  // default mode unchanged: format is an unenforced hint
+  assert.deepEqual(ids(pschema(fmt("email"), a)), ["provider/schema-unenforced-keyword"]);
+});
+
+test("provider: caseSensitive:false flags names that differ only by case", () => {
+  const t = (name) => ({ name, description: "d", inputSchema: { type: "object" } });
+  const p = syntheticProfile({ toolName: { caseSensitive: false } });
+  assert.deepEqual(ids(provider([t("Search"), t("search"), t("other")], [p])), ["provider/name-case-collision"]);
+  assert.deepEqual(provider([t("Search"), t("search")], [syntheticProfile({ toolName: { caseSensitive: true } })]), []);
+});
+
+test("annotations-consistency: readOnly + idempotentHint:false flags; readOnly + idempotentHint:true does not", () => {
+  const t = (a) => ({ name: "get_x", description: "d", inputSchema: { type: "object", additionalProperties: false }, annotations: a });
+  assert.ok(ids(core([t({ readOnlyHint: true, idempotentHint: false })])).includes("tool/annotations-consistency"));
+  assert.ok(!ids(core([t({ readOnlyHint: true, idempotentHint: true })])).includes("tool/annotations-consistency"));
+  assert.ok(!ids(core([t({ readOnlyHint: false, idempotentHint: false })])).includes("tool/annotations-consistency"));
+});
+
+test("client-config: 32+ hex under a secret-named key is flagged; hashes under other keys are not", () => {
+  const hex = "0123456789abcdef0123456789abcdef";
+  assert.equal(looksHexSecret("API_KEY", hex), true);
+  assert.equal(looksHexSecret("Authorization", `Bearer ${hex}`), true);
+  assert.equal(looksHexSecret("COMMIT_SHA", hex + "01234567"), false);
+  assert.equal(looksHexSecret("API_KEY", "0123abcd"), false); // too short
+  const f = [];
+  runClientConfigRules({ mcpServers: { s: { command: "node", env: { API_KEY: hex, GIT_SHA: hex }, } } }, collectInto(f));
+  assert.deepEqual(f.filter((x) => x.id === "client-config/no-hardcoded-secrets").map((x) => x.tool), ["s.env.API_KEY"]);
+});
+
+test("rules.json: every rule id these tests emit is catalogued; dead client-config/valid-json is gone", () => {
+  for (const id of ["tool/input-schema-unchecked", "provider/schema-max-properties", "provider/name-case-collision"])
+    assert.ok(ruleIds.has(id), id);
+  assert.ok(!ruleIds.has("client-config/valid-json"));
 });
