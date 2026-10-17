@@ -4,7 +4,7 @@
 // MCP Tool objects against the core spec rules + targeted provider profiles.
 // (server.json / client-config linters and ajv-backed schema rules land next.)
 
-import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { runCoreRules, runProviderRules } from "./rules.mjs";
@@ -12,6 +12,7 @@ import { runSchemaValidity } from "./schema.mjs";
 import { runServerJsonRules } from "./server-json.mjs";
 import { runClientConfigRules } from "./client-config.mjs";
 import { inspectStdio } from "./inspect.mjs";
+import { loadAllProfiles, portableProfileIds } from "./profiles.mjs";
 import { renderHuman, renderSarif } from "./report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,20 +39,6 @@ function parseArgs(argv) {
     else if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--version" || a === "-v") out.version = true;
     else if (!a.startsWith("--")) out._.push(a);
-  }
-  return out;
-}
-
-function loadProfiles(dir) {
-  const out = {};
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(".json") || f === "profile.schema.json") continue;
-    try {
-      const p = loadJSON(join(dir, f));
-      if (p.id) out[p.id] = p;
-    } catch {
-      /* skip malformed profile */
-    }
   }
   return out;
 }
@@ -108,7 +95,8 @@ USAGE
 
 OPTIONS
   --target <a,b>     provider profiles to check against (e.g. anthropic,openai); empty = MCP-spec only
-  --portable         check against every shipped provider profile
+  --portable         check against every verified profile (incl. the synthetic
+                     strictest-common-denominator one); unverified stubs are skipped
   --mode <m>         default | strict (applies each profile's strict{} rules)
   --type <t>         force artifact type: tools | server-json | client-config
   --format <f>       human (default) | sarif
@@ -152,17 +140,26 @@ if (existsSync(cfgPath)) {
 }
 const sevOverrides = config.rules || {};
 
-const allProfiles = loadProfiles(join(ROOT, "profiles"));
-if (config.profilesDir) {
-  const dir = resolve(dirname(cfgPath), config.profilesDir);
-  if (existsSync(dir)) Object.assign(allProfiles, loadProfiles(dir));
+// Every profile (shipped + config.profilesDir) is schema-validated at load; an
+// invalid one is a usage error (exit 2), never a silent skip.
+let allProfiles;
+try {
+  const profilesDir = config.profilesDir ? resolve(dirname(cfgPath), config.profilesDir) : null;
+  if (profilesDir && !existsSync(profilesDir))
+    console.error(`mcpconform: warning: profilesDir ${profilesDir} does not exist; using shipped profiles only`);
+  const loaded = loadAllProfiles(profilesDir && existsSync(profilesDir) ? profilesDir : null);
+  allProfiles = loaded.profiles;
+  for (const w of loaded.warnings) console.error(`mcpconform: warning: ${w}`);
+} catch (e) {
+  if (e.name !== "ProfileError") throw e;
+  console.error(`mcpconform: ${e.message}`);
+  process.exit(2);
 }
 
 let targetIds = args.target.length ? args.target : config.targets || [];
-if (args.portable || config.portable)
-  targetIds = Object.values(allProfiles)
-    .filter((p) => p.kind !== "spec-baseline" && p.kind !== "synthetic")
-    .map((p) => p.id);
+// --portable: every verified profile, including the synthetic
+// strictest-common-denominator one; unverified stubs are excluded.
+if (args.portable || config.portable) targetIds = portableProfileIds(allProfiles);
 const missing = targetIds.filter((id) => !allProfiles[id]);
 const activeProfiles = targetIds.map((id) => allProfiles[id]).filter(Boolean);
 

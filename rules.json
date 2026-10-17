@@ -6,7 +6,7 @@
     "warn": "MCP spec SHOULD, or a high-value correctness convention.",
     "info": "Opinionated quality; default-on but downgradeable. AI-judged rules slot in here later."
   },
-  "notes": "provider/* rules are PARAMETERIZED and provider-agnostic: each reads the active profile(s) declared in config.targets (or every profile under --portable). They are inert when no target is set. `reads` names the profile field consulted. No vendor is hardcoded in the engine.",
+  "notes": "provider/* rules are PARAMETERIZED and provider-agnostic: each reads the active profile(s) declared in config.targets (or every verified profile under --portable). They are inert when no target is set. `reads` names the profile field consulted. No vendor is hardcoded in the engine.",
   "rules": [
     {
       "id": "tool/name-required",
