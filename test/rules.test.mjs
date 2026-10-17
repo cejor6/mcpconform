@@ -581,3 +581,47 @@ test("cli inspect: a server that closes its stdin fails cleanly (no unhandled EP
   noStack(r);
   assert.equal(r.code, 2);
 });
+
+// --- ReDoS: 300KB adversarial inputs stay linear ---
+const fast = (fn, ms) => {
+  const t = process.hrtime.bigint();
+  fn();
+  const took = Number(process.hrtime.bigint() - t) / 1e6;
+  assert.ok(took < ms, `took ${took.toFixed(0)}ms (budget ${ms}ms)`);
+};
+
+test("redos: malformed ${...} check is linear on 300KB of unterminated refs", () => {
+  const f = [];
+  fast(() => runClientConfigRules({ mcpServers: { a: { command: "x", args: ["${a:-".repeat(60000)] } } }, (id) => f.push(id)), 1000);
+  assert.ok(f.includes("client-config/env-refs-declared"));
+});
+
+test("redos: JWT secret check is linear on 300KB of '-eyJ' runs", () => {
+  fast(() => runClientConfigRules({ mcpServers: { a: { command: "x", env: { K: "eyJ-".repeat(75000) } } } }, () => {}), 1000);
+});
+
+test("client-config: ${...} and JWT detection semantics are unchanged", () => {
+  const flagged = (v, where = "args") => {
+    const f = [];
+    const cfg = where === "args" ? { command: "x", args: [v] } : { command: "x", env: { K: v } };
+    runClientConfigRules({ mcpServers: { a: cfg } }, (id) => f.push(id));
+    return f;
+  };
+  assert.ok(!flagged("${A:-$HOME}").includes("client-config/env-refs-declared"));
+  assert.ok(!flagged("${A:-${B}}").includes("client-config/env-refs-declared"));
+  assert.ok(flagged("${A} then ${").includes("client-config/env-refs-declared"));
+  assert.ok(flagged("${} x }").includes("client-config/env-refs-declared"));
+
+  // Differential check of the JWT detector against the original regex.
+  const JWT = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/;
+  const alphabet = ["eyJ", "-", ".", "a", "b", "_", " ", "=", "e", "y", "J", "aaaaaaaaaa"];
+  let seed = 7;
+  const rnd = (k) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % k);
+  for (let i = 0; i < 3000; i++) {
+    let v = "";
+    for (let j = rnd(40); j > 0; j--) v += alphabet[rnd(alphabet.length)];
+    const got = flagged(v, "env").includes("client-config/no-hardcoded-secrets");
+    assert.equal(got, JWT.test(v), JSON.stringify(v));
+  }
+  assert.ok(flagged("x-eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4f", "env").includes("client-config/no-hardcoded-secrets"));
+});
