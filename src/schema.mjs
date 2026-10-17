@@ -128,7 +128,19 @@ function collect(schema, depth, acc) {
 const META_OK = new Set(["$schema", "$id"]);
 
 // Provider subset checks for one tool's inputSchema against one profile.
+// A pathologically deep schema can overflow the recursive walk; report it as
+// unchecked (a warning) for this profile instead of crashing the whole run.
 export function checkProviderSchema(toolName, schema, profile, mode, emit) {
+  try {
+    checkProviderSchemaUnguarded(toolName, schema, profile, mode, emit);
+  } catch (e) {
+    if (!(e instanceof RangeError)) throw e;
+    emit("tool/input-schema-unchecked", toolName,
+      `inputSchema is nested too deeply to check against ${profile.id} (stack overflow while walking it).`, profile.id);
+  }
+}
+
+function checkProviderSchemaUnguarded(toolName, schema, profile, mode, emit) {
   if (!schema || typeof schema !== "object") return;
   const is = profile.inputSchema || {};
   const sp = profile.strict || {};

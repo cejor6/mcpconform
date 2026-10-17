@@ -94,7 +94,7 @@
       "tier": "info",
       "appliesTo": "tool",
       "source": "tools spec (Recommended form for zero-param tools)",
-      "message": "Zero-parameter tools (no properties, or properties: {}) should use { type: object, additionalProperties: false }.",
+      "message": "Zero-parameter tools (no properties, or properties: {}) should use { type: object, additionalProperties: false }. Map-style schemas (additionalProperties: <schema>, or patternProperties) are exempt.",
       "bad": "{ \"type\": \"object\", \"properties\": {} }",
       "good": "{ \"type\": \"object\", \"additionalProperties\": false }"
     },
@@ -337,7 +337,7 @@
     },
     {
       "id": "provider/schema-max-properties",
-      "tier": "error",
+      "tier": "warn",
       "appliesTo": "tool",
       "family": "provider",
       "reads": "inputSchema.maxProperties | strict.maxProperties",

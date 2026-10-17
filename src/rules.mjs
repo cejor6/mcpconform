@@ -12,26 +12,39 @@ import { nameWords } from "./names.mjs";
 
 // Mutating-verb detection on TOOL NAMES (never property names). The name is
 // split into words on _ - . and camelCase boundaries, and a verb must be a whole
-// word: a leading verb (delete_user, deleteUser, delete), or a trailing one
-// (user_delete) unless the name starts with a read verb (check_for_update).
-// "set"/"place" are leading-only: as a suffix they are usually nouns (data_set,
-// market_place). Whole-word matching keeps "updated"/"settings"/"reset_at"-style
-// words out ("updated" is not "update").
+// word ("updated"/"settings" never match):
+//   - a leading verb counts (delete_user, deleteUser, delete), except a bare
+//     verb + timestamp/owner/id word (reset_at, update_by, delete_id), which
+//     names a field, not an action;
+//   - a trailing verb counts only in a two-word name (user_delete) whose first
+//     word is not itself a verb of inspection (get_/list_/suggest_/evaluate_...)
+//     and that isn't a compound noun (price_drop, status_update, auto_update).
+//     "set"/"place" never count as suffixes (data_set, market_place).
 const MUTATING_VERBS = new Set([
   "delete", "remove", "drop", "destroy", "cancel", "purge", "reset", "revoke", "send", "place",
   "create", "update", "set", "write", "edit", "move", "rename",
 ]);
 const NOUNLIKE_SUFFIX = new Set(["set", "place"]);
+const FIELD_SUFFIX = new Set(["at", "by", "id", "on"]);
 const READ_VERBS = new Set([
   "get", "list", "read", "fetch", "find", "search", "query", "lookup", "describe", "show", "view",
-  "check", "is", "has", "can", "count", "preview", "validate", "watch", "inspect",
+  "check", "is", "has", "can", "count", "preview", "validate", "watch", "inspect", "suggest",
+  "evaluate", "estimate", "simulate", "explain", "analyze", "compare", "predict", "recommend",
 ]);
+// first words that turn a trailing drop/move/update into a compound noun
+const COMPOUND_NOUN_HEAD = new Set(["status", "auto", "price"]);
 export function isMutatingName(name) {
   const w = nameWords(name);
   if (!w.length) return false;
-  if (MUTATING_VERBS.has(w[0])) return true;
-  const last = w[w.length - 1];
-  return w.length > 1 && MUTATING_VERBS.has(last) && !NOUNLIKE_SUFFIX.has(last) && !READ_VERBS.has(w[0]);
+  if (MUTATING_VERBS.has(w[0])) return !(w.length === 2 && FIELD_SUFFIX.has(w[1]));
+  if (w.length !== 2) return false;
+  const [first, last] = w;
+  return (
+    MUTATING_VERBS.has(last) &&
+    !NOUNLIKE_SUFFIX.has(last) &&
+    !READ_VERBS.has(first) &&
+    !(COMPOUND_NOUN_HEAD.has(first) && ["drop", "move", "update"].includes(last))
+  );
 }
 
 // --- core (agnostic) -------------------------------------------------------
@@ -86,8 +99,11 @@ export function runCoreRules(tools, emit) {
 
     // zero-parameter tool shape (info). `properties: {}` declares no parameters
     // either, so without additionalProperties:false it still accepts any input.
+    // Map-style tools (additionalProperties: <schema>, or patternProperties)
+    // take their parameters that way on purpose, so they are not zero-param.
     const noProps = !s?.properties || (typeof s.properties === "object" && !Array.isArray(s.properties) && !Object.keys(s.properties).length);
-    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && noProps && s.additionalProperties !== false)
+    const mapStyle = (s?.additionalProperties && typeof s.additionalProperties === "object") || s?.patternProperties !== undefined;
+    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && noProps && !mapStyle && s.additionalProperties !== false)
       emit("tool/no-params-shape", where, "Zero-parameter tool should set additionalProperties:false to accept only empty input.");
 
     // outputSchema root must be object

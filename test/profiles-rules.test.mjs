@@ -175,6 +175,21 @@ test("schema: a ~1500-deep schema is 'unchecked', not invalid (no stack-overflow
   assert.deepEqual(validateInputSchema({ type: "object" }), { ok: true });
 });
 
+test("cli: a 3000-deep schema with a provider target warns instead of crashing", () => {
+  const n = 3000;
+  const schema = '{"type":"object","properties":{"a":'.repeat(n) + '{"type":"string"}' + "}}".repeat(n);
+  const dir = mkdtempSync(join(tmpdir(), "mcpconform-deep-"));
+  try {
+    const file = join(dir, "deep.json");
+    writeFileSync(file, `{"tools":[{"name":"deep","description":"d","inputSchema":${schema}}]}`);
+    const r = cli([file, "--target", "openai"]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /tool\/input-schema-unchecked <openai> \[deep\]/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("schema: shared ajv instance does not leak $ids between tools", () => {
   const s = () => ({ $id: "https://example.com/s", type: "object", properties: { a: { $id: "https://example.com/n", type: "string" } } });
   for (let i = 0; i < 3; i++) assert.deepEqual(validateInputSchema(s()), { ok: true });
@@ -196,10 +211,20 @@ test("schema: 2000 tools validate quickly (one cached ajv per dialect)", () => {
 // --- false positives / negatives -----------------------------------------------------
 
 test("secret names: whole-word match; MAX_TOKENS/TOKEN_LIMIT/AUTHOR are not secrets", () => {
-  for (const n of ["MAX_TOKENS", "TOKEN_LIMIT", "AUTHOR", "AUTHOR_NAME", "KEYBOARD_LAYOUT", "API_KEY_ID", "SECRET_PATH", "PUBLIC_KEY", "PASSWORD_MIN_LENGTH"])
+  for (const n of ["MAX_TOKENS", "TOKEN_LIMIT", "AUTHOR", "AUTHOR_NAME", "KEYBOARD_LAYOUT", "MONKEY", "TOKENIZER", "API_KEY_ID", "SECRET_PATH", "PUBLIC_KEY", "PASSWORD_MIN_LENGTH", "KEY"])
     assert.equal(isSecretName(n), false, n);
-  for (const n of ["API_KEY", "GITHUB_TOKEN", "apiKey", "DB_PASSWORD", "CLIENT_SECRET", "BASIC_AUTH", "PRIVATE_KEY", "APIKEY", "Authorization", "X-Api-Key"])
+  for (const n of ["API_KEY", "GITHUB_TOKEN", "apiKey", "DB_PASSWORD", "CLIENT_SECRET", "BASIC_AUTH", "PRIVATE_KEY", "APIKEY", "Authorization", "X-Api-Key", "STRIPE_SECRET_KEY"])
     assert.equal(isSecretName(n), true, n);
+});
+
+test("secret names: run-together forms still match (main caught them as substrings)", () => {
+  for (const n of ["ACCESSTOKEN", "AUTHTOKEN", "APITOKEN", "SECRETKEY", "CLIENTSECRET", "PRIVATEKEY"])
+    assert.equal(isSecretName(n), true, n);
+});
+
+test("secret names: data keys are not secrets (KEY needs a secret-ish qualifier)", () => {
+  for (const n of ["PARTITION_KEY", "SORT_KEY", "CACHE_KEY", "PRIMARY_KEY_COLUMN", "STRIPE_PUBLISHABLE_KEY", "ROUTING_KEY", "IDEMPOTENCY_KEY", "FOREIGN_KEY"])
+    assert.equal(isSecretName(n), false, n);
 });
 
 test("server.json: env-secret-flag no longer fires on MAX_TOKENS / TOKEN_LIMIT / AUTHOR", () => {
@@ -221,6 +246,10 @@ test("mutating verbs: camelCase, suffixed and bare verbs; not 'updated_at'-style
     assert.equal(isMutatingName(n), true, n);
   for (const n of ["updated_at", "get_updates", "check_for_update", "data_set", "market_place", "settings_get", "list_deleted"])
     assert.equal(isMutatingName(n), false, n);
+  // compound nouns, read-verb + trailing verb, and verb + field suffix are not actions
+  for (const n of ["price_drop", "suggest_move", "evaluate_move", "status_update", "auto_update", "reset_at", "update_by", "delete_id"])
+    assert.equal(isMutatingName(n), false, n);
+  assert.equal(isMutatingName("delete_by_id"), true);
   assert.ok(ids(core([{ name: "deleteUser", description: "d", inputSchema: { type: "object", additionalProperties: false } }])).includes("tool/destructive-needs-annotation"));
 });
 
@@ -229,6 +258,12 @@ test("no-params-shape: properties:{} without additionalProperties:false is flagg
   assert.ok(ids(core([t({ type: "object", properties: {} })])).includes("tool/no-params-shape"));
   assert.ok(!ids(core([t({ type: "object", properties: {}, additionalProperties: false })])).includes("tool/no-params-shape"));
   assert.ok(!ids(core([t({ type: "object", properties: { a: { type: "string", description: "a" } } })])).includes("tool/no-params-shape"));
+});
+
+test("no-params-shape: map-style tools (additionalProperties schema / patternProperties) are exempt", () => {
+  const t = (s) => ({ name: "set_labels", description: "d", inputSchema: s, annotations: { destructiveHint: false } });
+  assert.ok(!ids(core([t({ type: "object", additionalProperties: { type: "string" } })])).includes("tool/no-params-shape"));
+  assert.ok(!ids(core([t({ type: "object", properties: {}, patternProperties: { "^x-": { type: "string" } } })])).includes("tool/no-params-shape"));
 });
 
 // --- rule claims now implemented ---------------------------------------------------
@@ -299,6 +334,11 @@ test("client-config: 32+ hex under a secret-named key is flagged; hashes under o
   const f = [];
   runClientConfigRules({ mcpServers: { s: { command: "node", env: { API_KEY: hex, GIT_SHA: hex }, } } }, collectInto(f));
   assert.deepEqual(f.filter((x) => x.id === "client-config/no-hardcoded-secrets").map((x) => x.tool), ["s.env.API_KEY"]);
+});
+
+test("rules.json: provider/schema-max-properties is warn-tier (profile limits pending re-verification)", () => {
+  const r = JSON.parse(readFileSync(join(ROOT, "rules.json"), "utf8")).rules.find((x) => x.id === "provider/schema-max-properties");
+  assert.equal(r.tier, "warn");
 });
 
 test("rules.json: every rule id these tests emit is catalogued; dead client-config/valid-json is gone", () => {
