@@ -625,3 +625,27 @@ test("client-config: ${...} and JWT detection semantics are unchanged", () => {
   }
   assert.ok(flagged("x-eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4f", "env").includes("client-config/no-hardcoded-secrets"));
 });
+
+// --- output escaping ---
+test("cli: control characters from the input are escaped in the human report", () => {
+  const f = rfile({ tools: [{ name: "a\u001b[31mRED\u0007\rX\u009b2J‮", description: "d", inputSchema: { type: "object" } }] });
+  const r = rrun([f]);
+  assert.doesNotMatch(r.stdout, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‮]/); // only the report's own \n
+  assert.match(r.stdout, /a\\u001b\[31mRED\\u0007\\rX\\u009b2J\\u202e/);
+});
+
+test("cli: SARIF carries no raw control characters and round-trips the original text", () => {
+  const name = "a\u001b[31m\u009b‮b";
+  const r = rrun([rfile({ tools: [{ name, description: "d", inputSchema: { type: "object" } }] }), "--format", "sarif"]);
+  assert.doesNotMatch(r.stdout, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‮]/);
+  const res = JSON.parse(r.stdout).runs[0].results;
+  assert.ok(res.some((x) => x.message.text.startsWith(`${name}: `)));
+});
+
+test("cli: SARIF run properties carry the targets and per-artifact summaries", () => {
+  const r = rrun(["examples/tools.good.json", "examples/server.bad.json", "--target", "anthropic", "--format", "sarif"]);
+  const props = JSON.parse(r.stdout).runs[0].properties;
+  assert.deepEqual(props.targets, ["anthropic"]);
+  assert.equal(props.summaries.length, 2);
+  assert.match(props.summaries[1], /\[server\.json\]/);
+});
