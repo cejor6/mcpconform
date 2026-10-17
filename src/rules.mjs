@@ -7,6 +7,7 @@
 // Each rule calls emit(ruleId, toolNameOrNull, message, profileIdOrNull).
 // Severity is resolved by the caller from rules.json + config overrides.
 
+import { show } from "./text.mjs";
 import { checkProviderSchema } from "./schema.mjs";
 import { nameWords } from "./names.mjs";
 
@@ -52,7 +53,7 @@ export function runCoreRules(tools, emit) {
   if (!Array.isArray(tools)) return; // the CLI reports a non-array as meta/unrecognized-artifact
   const seen = new Set();
   tools.forEach((t, i) => {
-    const where = t && typeof t === "object" ? (t.name ?? `#${i}`) : `#${i}`;
+    const where = t && typeof t === "object" && t.name != null ? show(t.name) : `#${i}`;
     if (!t || typeof t !== "object") {
       emit("tool/name-required", where, "Tool entry is not an object.");
       return;
@@ -70,7 +71,7 @@ export function runCoreRules(tools, emit) {
       seen.add(t.name);
     }
 
-    if (!t.description || !String(t.description).trim())
+    if (!t.description || !show(t.description).trim())
       emit("tool/description-present", where, "No description; agents select tools from descriptions.");
 
     const s = t.inputSchema;
@@ -84,9 +85,9 @@ export function runCoreRules(tools, emit) {
           `inputSchema root type must be "object" (got ${JSON.stringify(s.type)}).`);
       if (Array.isArray(s.required) && s.properties && typeof s.properties === "object") {
         for (const r of s.required)
-          if (!Object.hasOwn(s.properties, r)) // not `in`: "constructor"/"toString" are inherited
+          if (!(typeof r === "string" && Object.hasOwn(s.properties, r))) // not `in`: "constructor"/"toString" are inherited
             emit("tool/required-references-properties", where,
-              `required lists "${r}" but it is not in properties.`);
+              `required lists "${show(r)}" but it is not in properties.`);
       }
     }
 
@@ -120,7 +121,7 @@ export function runCoreRules(tools, emit) {
     if (s && typeof s === "object" && s.properties && typeof s.properties === "object") {
       const missing = Object.keys(s.properties).filter((k) => {
         const ps = s.properties[k];
-        return !ps || typeof ps !== "object" || !String(ps.description || "").trim();
+        return !ps || typeof ps !== "object" || !show(ps.description || "").trim();
       });
       if (missing.length) emit("tool/property-descriptions", where, `properties without a description: ${missing.join(", ")}`);
     }

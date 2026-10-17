@@ -547,9 +547,18 @@
       "tier": "error",
       "appliesTo": "meta",
       "source": "engine",
-      "message": "The artifact's type could not be determined, its shape does not match the forced --type, or it contains zero tools — so nothing (or nothing useful) was linted.",
-      "bad": "{\"mcpServer\": {...}}  (typo for mcpServers)  /  {\"tools\": []}",
-      "good": "{\"mcpServers\": {...}}  /  {\"tools\": [{...}]}"
+      "message": "The artifact's type could not be determined, or its shape does not match the forced --type, so nothing was linted. The message names a likely fix (a near-miss key such as mcpServer, or a server.json missing packages[]/remotes[]).",
+      "bad": "{\"mcpServer\": {...}}  (typo for mcpServers)",
+      "good": "{\"mcpServers\": {...}}"
+    },
+    {
+      "id": "meta/empty-artifact",
+      "tier": "warn",
+      "appliesTo": "meta",
+      "source": "engine (a prompt/resource-only server legitimately has zero tools; inspect's --min-tools is the opt-in fail-gate)",
+      "message": "The artifact was recognized but contains nothing to lint: a tools dump with zero tools, or a client config with zero servers. A warning, not an error, because both can be legitimate.",
+      "bad": "{\"tools\": []}  /  {\"mcpServers\": {}}",
+      "good": "{\"tools\": [{...}]}"
     },
     {
       "id": "meta/internal-error",

@@ -1,5 +1,7 @@
 // Output formatters: human-readable (default) and SARIF 2.1.0 (for GitHub code scanning).
 
+import { show } from "./text.mjs";
+
 const ORDER = { error: 0, warn: 1, info: 2 };
 const LABEL = { error: "ERROR", warn: "WARN ", info: "INFO " };
 
@@ -12,7 +14,7 @@ const LABEL = { error: "ERROR", warn: "WARN ", info: "INFO " };
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 const NAMED = { "\n": "\\n", "\r": "\\r", "\t": "\\t" };
 const uEscape = (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`;
-export const escapeControl = (s) => String(s).replace(CONTROL, (c) => NAMED[c] ?? uEscape(c));
+export const escapeControl = (s) => show(s).replace(CONTROL, (c) => NAMED[c] ?? uEscape(c));
 
 export function renderHuman(findings, ruleMeta, meta) {
   const esc = escapeControl;

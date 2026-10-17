@@ -651,12 +651,47 @@ test("cli: an unrecognized shape is a meta error, not a clean 0-tool lint", () =
   }
 });
 
-test("cli: a tools artifact with zero tools is flagged", () => {
-  for (const doc of [{ tools: [] }, []]) {
+test("cli: an unrecognized shape names a likely fix", () => {
+  let r = rrun([rfile({ mcpServer: { a: { command: "x" } } })]);
+  assert.match(r.out, /Found "mcpServer" — did you mean "mcpServers"\?/);
+  r = rrun([rfile({ name: "io.github.a/b", version: "1.0.0", description: "d" })]);
+  assert.match(r.out, /Looks like a server\.json with no packages\[\], remotes\[\] or \$schema/);
+});
+
+test("cli: zero tools / zero servers is a meta/empty-artifact warning, not an error", () => {
+  for (const doc of [{ tools: [] }, [], { mcpServers: {} }]) {
     const r = rrun([rfile(doc)]);
-    assert.equal(r.code, 1);
-    assert.match(r.out, /meta\/unrecognized-artifact[\s\S]*zero tools/);
+    assert.equal(r.code, 0, JSON.stringify(doc)); // prompt/resource-only servers are legitimate
+    assert.match(r.out, /WARN  meta\/empty-artifact/);
+    assert.doesNotMatch(r.out, /unrecognized-artifact/);
   }
+  // and it can be raised to a fail-gate (or turned off) on its own
+  const cfg = rfile({ rules: { "meta/empty-artifact": "error" } });
+  assert.equal(rrun([rfile({ tools: [] }), "--config", cfg]).code, 1);
+});
+
+test("cli: inspect --dump of a zero-tool server lints clean-with-warning, not as an error", () => {
+  const srv = join(RTMP, "notools.mjs");
+  writeFileSync(srv, `
+let buf = "";
+process.stdin.on("data", (c) => {
+  buf += c;
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const m = JSON.parse(buf.slice(0, nl)); buf = buf.slice(nl + 1);
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: m.method === "tools/list" ? { tools: [] } : {} }) + "\\n");
+  }
+});`);
+  const dump = join(RTMP, "notools-dump.json");
+  assert.equal(rrun(["inspect", "--dump", dump, "--", process.execPath, srv]).code, 0);
+  assert.equal(rrun([dump]).code, 0);
+});
+
+test("cli: a VS Code settings.json is linted through its mcp.servers block", () => {
+  const r = rrun([rfile({ "editor.fontSize": 12, mcp: { servers: { a: { command: "x", url: "https://e" } } } })]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /\[client-config\]  \(1 server\(s\)\)/);
+  assert.match(r.out, /client-config\/one-transport/);
 });
 
 test("cli: --type still requires the matching JSON shape", () => {
@@ -669,9 +704,69 @@ test("cli: --type still requires the matching JSON shape", () => {
   assert.equal(r.code, 0);
 });
 
-test("cli: the unrecognized-artifact rule can be turned off in config", () => {
-  const cfg = rfile({ rules: { "meta/unrecognized-artifact": "off" } });
-  assert.equal(rrun([rfile({ tools: [] }), "--config", cfg]).code, 0);
+test("cli: object-valued names/versions ({toString: 1}) are findings, in both formats", () => {
+  const evil = { toString: 1 };
+  const files = [
+    rfile({ tools: [{ name: evil, description: evil, inputSchema: { type: "object", properties: { a: { description: evil } }, required: [evil] } }] }),
+    rfile({ name: evil, version: evil, packages: [{ registryType: evil, version: evil, transport: { type: evil } }], remotes: [{ type: evil }] }),
+  ];
+  for (const fmt of ["human", "sarif"]) {
+    const r = rrun([...files, "--format", fmt, "--target", "anthropic"]);
+    noStack(r);
+    assert.equal(r.code, 1, r.out);
+    assert.doesNotMatch(r.out, /internal-error|internal error/);
+    assert.match(r.out, /\{\\?"toString\\?":1\}/);
+  }
+});
+
+test("cli: a crash while rendering still exits 2 with meta/internal-error", () => {
+  const hook =
+    "data:text/javascript,const o=String.prototype.localeCompare;" +
+    "String.prototype.localeCompare=function(...a){if(String(this).includes('render_crash'))throw new Error('render boom');return o.apply(this,a)}";
+  const f = join(RTMP, "render_crash.json");
+  writeFileSync(f, JSON.stringify({ tools: [{ name: "a" }, { name: "b" }] }));
+  const r = rrun([f, "examples/tools.bad.json"], ["--import", hook]);
+  noStack(r);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /meta\/internal-error[\s\S]*rendering the report: render boom/);
+});
+
+test("rules: deterministic fuzz with hostile values never throws", async () => {
+  const { loadAllProfiles: load } = await import("../src/profiles.mjs");
+  const { renderHuman, renderSarif } = await import("../src/report.mjs");
+  const { show } = await import("../src/text.mjs");
+  const profs = Object.values(load().profiles);
+  let seed = 1;
+  const rnd = (k) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % k);
+  const atoms = [null, 0, 1.5, true, "", "x", "delete_user", "API_KEY", "${", "eyJ", { toString: 1 }, { valueOf: 1, toString: 1 }, [], [null], {}, "object"];
+  const keys = ["name", "description", "inputSchema", "outputSchema", "annotations", "title", "execution", "_meta", "icons", "type",
+    "properties", "required", "items", "anyOf", "$ref", "$defs", "additionalProperties", "format", "taskSupport", "readOnlyHint",
+    "packages", "remotes", "version", "registryType", "transport", "url", "environmentVariables", "packageArguments", "mcpServers",
+    "servers", "command", "args", "env", "headers", "mimeType", "src", "toString", "constructor", "$schema", "enum", "pattern"];
+  const val = (d) => {
+    const r = rnd(10);
+    if (d > 4 || r < 4) return atoms[rnd(atoms.length)];
+    if (r < 6) return Array.from({ length: rnd(4) }, () => val(d + 1));
+    const o = {};
+    for (let i = rnd(6); i > 0; i--) o[keys[rnd(keys.length)]] = val(d + 1);
+    return o;
+  };
+  for (let i = 0; i < 1500; i++) {
+    const doc = val(0);
+    const tools = Array.isArray(doc) ? doc : [doc, val(1)];
+    const f = [];
+    const emit = (id, tool, message, profile = null) =>
+      f.push({ id, tier: "warn", tool: tool == null ? null : show(tool), message: show(message), profile, file: "x" });
+    assert.doesNotThrow(() => {
+      runCoreRules(tools, emit);
+      for (const m of ["default", "strict"]) runProviderRules(tools, profs, emit, m);
+      runServerJsonRules(doc, emit, { packageVersion: "1.0.0" });
+      runClientConfigRules(doc, emit);
+      runClientConfigRules({ mcpServers: doc }, emit);
+      renderHuman(f, {}, { summaries: ["s"] });
+      renderSarif(f, {}, { summaries: [] });
+    }, show(doc));
+  }
 });
 
 // --- malformed input: findings, never crashes ---
@@ -912,4 +1007,39 @@ test("redos: name splitting (secret names, mutating verbs) is linear on a 300KB 
     for (let j = rnd(20); j > 0; j--) v += alphabet[rnd(alphabet.length)];
     assert.deepEqual(nameWords(v), orig(v), JSON.stringify(v));
   }
+});
+
+test("detect: isServerSchemaUri is exactly /server.*schema/i (randomized, incl. line terminators)", async () => {
+  const { isServerSchemaUri } = await import("../src/detect.mjs");
+  const RE = /server.*schema/i;
+  const alphabet = ["server", "schema", "SERVER", "Schema", "serv", "er", "sch", "ema", "\n", "\r", "\u2028", "\u2029", "/", ".", "x", "ſ", "K", "İ"];
+  let seed = 5;
+  const rnd = (k) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % k);
+  for (let i = 0; i < 5000; i++) {
+    let v = "";
+    for (let j = rnd(12); j > 0; j--) v += alphabet[rnd(alphabet.length)];
+    assert.equal(isServerSchemaUri(v), RE.test(v), JSON.stringify(v));
+  }
+  fast(() => isServerSchemaUri("server".repeat(50000)), 1000);
+});
+
+test("client-config: the linear ${...} check matches the original regex (randomized)", () => {
+  const VAR_REF = /\$\{[A-Za-z_][A-Za-z0-9_]*(?::[-+?][^}]*)?\}/g;
+  const orig = (v) => v.replace(VAR_REF, "").includes("${");
+  const alphabet = ["${", "}", "$", "{", "A", "_", "1", ":-", ":+", ":?", ":", "-", " ", "${A}", "${A:-"];
+  let seed = 9;
+  const rnd = (k) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % k);
+  for (let i = 0; i < 5000; i++) {
+    let v = "";
+    for (let j = rnd(12); j > 0; j--) v += alphabet[rnd(alphabet.length)];
+    const f = [];
+    runClientConfigRules({ mcpServers: { a: { command: "x", args: [v] } } }, (id) => f.push(id));
+    assert.equal(f.includes("client-config/env-refs-declared"), orig(v), JSON.stringify(v));
+  }
+});
+
+test("cli: a bad config minSeverity names the config key, not the flag", () => {
+  const r = rrun(["examples/tools.good.json", "--config", rfile({ minSeverity: "loud" })]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /config `minSeverity` must be error\|warn\|info/);
 });

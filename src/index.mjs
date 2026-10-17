@@ -14,6 +14,8 @@ import { runClientConfigRules } from "./client-config.mjs";
 import { inspectStdio } from "./inspect.mjs";
 import { loadAllProfiles, portableProfileIds } from "./profiles.mjs";
 import { renderHuman, renderSarif, escapeControl } from "./report.mjs";
+import { detectType, vscodeMcpBlock, unrecognizedHint } from "./detect.mjs";
+import { show } from "./text.mjs";
 
 // Exit codes: 0 = clean, 1 = error-tier findings, 2 = usage error or internal
 // failure (bad flag/config, server failed to start, a crash while linting).
@@ -87,27 +89,6 @@ function parseArgs(argv) {
 
 function checkEnum(label, value, allowed) {
   if (!allowed.includes(value)) usageError(`${label} must be ${allowed.join("|")} (got ${q(value)})`);
-}
-
-// "server" followed (anywhere later) by "schema", case-insensitive. Equivalent
-// to /server.*schema/i, which is quadratic on a long "serverserver..." $schema.
-function isServerSchemaUri(s) {
-  if (typeof s !== "string") return false;
-  const l = s.toLowerCase();
-  const i = l.indexOf("server");
-  return i >= 0 && l.includes("schema", i + 6);
-}
-
-// Returns null when the shape matches no known artifact; the caller reports
-// that as meta/unrecognized-artifact instead of guessing "tools" (which used
-// to lint 0 tools and pass a typo'd or empty file clean).
-function detectType(doc) {
-  if (Array.isArray(doc)) return "tools";
-  if (!isObj(doc)) return null;
-  if (doc.mcpServers || doc.servers) return "client-config";
-  if (doc.packages || doc.remotes || isServerSchemaUri(doc.$schema)) return "server-json";
-  if (Object.hasOwn(doc, "tools")) return "tools";
-  return null;
 }
 
 function parseEnvFile(p) {
@@ -266,7 +247,8 @@ checkEnum(args.mode !== undefined ? "--mode" : "config `mode`", mode, ["default"
 const TIER_RANK = { error: 0, warn: 1, info: 2 };
 const minSeverity = args.minSeverity !== undefined ? args.minSeverity : config.minSeverity ?? "info";
 if (typeof minSeverity !== "string" || !Object.hasOwn(TIER_RANK, minSeverity)) {
-  console.error(`mcpconform: --min-severity must be error|warn|info (got ${q(minSeverity)})`);
+  const label = args.minSeverity !== undefined ? "--min-severity" : "config `minSeverity`";
+  console.error(`mcpconform: ${label} must be error|warn|info (got ${q(minSeverity)})`);
   process.exit(2);
 }
 const atOrAboveFloor = (f) => TIER_RANK[f.tier] <= TIER_RANK[minSeverity];
@@ -335,8 +317,15 @@ function aggregate(findings, toolCounts) {
 // floor nor aggregation (both display-only) can ever change it.
 function emitReport(findings, meta, toolCounts = {}) {
   const shown = findings.filter(atOrAboveFloor);
-  const reported = expand ? shown : aggregate(shown, toolCounts);
-  const output = args.format === "sarif" ? renderSarif(reported, ruleMeta, meta) : renderHuman(reported, ruleMeta, meta);
+  const render = (list) => (args.format === "sarif" ? renderSarif(list, ruleMeta, meta) : renderHuman(list, ruleMeta, meta));
+  let output;
+  try {
+    output = render(expand ? shown : aggregate(shown, toolCounts));
+  } catch (e) {
+    // Never lose the whole report (and the SARIF file) to one unrenderable finding.
+    findings = [internalError(null, e, "rendering the report")];
+    output = render(findings);
+  }
   if (args.out) writeFileSync(resolve(args.out), output + "\n");
   else console.log(output);
   // A crash while linting an artifact is reported as a meta/internal-error
@@ -355,9 +344,9 @@ function exitAfterFlush(code) {
 // The reader went away (`mcpconform ... | head`): not an internal error.
 process.stdout.on("error", (e) => (e.code === "EPIPE" ? process.exit(process.exitCode ?? 0) : crash(e)));
 
-const internalError = (file, e) => ({
+const internalError = (file, e, while_ = "linting this artifact") => ({
   id: "meta/internal-error", tier: "error", tool: null, profile: null, file,
-  message: `mcpconform crashed while linting this artifact: ${String(e?.message ?? e).split("\n")[0].slice(0, 300)}`,
+  message: `mcpconform crashed while ${while_}: ${show(e?.message ?? e).split("\n")[0].slice(0, 300)}`,
 });
 
 // Lint one tools array (static dump or live tools/list) against core + profiles.
@@ -418,7 +407,7 @@ if (args._[0] === "inspect") {
   const emit = (id, tool, message, profile = null) => {
     const tier = severityFor(id);
     if (tier === "off") return;
-    findings.push({ id, tier, tool: tool ?? null, message, profile, file: label });
+    findings.push({ id, tier, tool: tool == null ? null : show(tool), message: show(message), profile, file: label });
   };
   try {
     lintTools(tools, emit, findings);
@@ -439,7 +428,7 @@ function lintOne(fileArg) {
   const emit = (id, tool, message, profile = null) => {
     const tier = severityFor(id);
     if (tier === "off") return;
-    findings.push({ id, tier, tool: tool ?? null, message, profile, file: fileArg });
+    findings.push({ id, tier, tool: tool == null ? null : show(tool), message: show(message), profile, file: fileArg });
   };
 
   const apath = resolve(fileArg);
@@ -462,7 +451,9 @@ function lintOne(fileArg) {
       emit("meta/unrecognized-artifact", null, why);
       return { findings, summary: `${fileArg}  [tools]  (no tools array)` };
     }
-    if (!tools.length) emit("meta/unrecognized-artifact", null, "The tools artifact contains zero tools, so nothing was linted.");
+    // Zero tools can be legitimate (a prompt/resource-only server), so this is a
+    // warning of its own, separate from the shape error above.
+    if (!tools.length) emit("meta/empty-artifact", null, "The tools artifact contains zero tools, so nothing was linted.");
     lintTools(tools, emit, findings);
     return { findings, summary: `${fileArg}  [tools]  (${tools.length} tools, ${targetNote()})`, toolCount: tools.length };
   }
@@ -476,12 +467,16 @@ function lintOne(fileArg) {
     return { findings, summary: `${fileArg}  [server.json]  (${count("packages")} package(s), ${count("remotes")} remote(s))` };
   }
   if (type === "client-config") {
-    runClientConfigRules(artifact, emit);
-    const servers = artifact.mcpServers || artifact.servers;
+    const cc = vscodeMcpBlock(artifact) || artifact; // VS Code settings.json: lint its "mcp" block
+    runClientConfigRules(cc, emit);
+    const servers = cc.mcpServers || cc.servers;
     const n = servers && typeof servers === "object" ? Object.keys(servers).length : 0;
+    if (servers && typeof servers === "object" && !n)
+      emit("meta/empty-artifact", null, "The client config declares zero servers, so nothing was linted.");
     return { findings, summary: `${fileArg}  [client-config]  (${n} server(s))` };
   }
-  emit("meta/unrecognized-artifact", null, UNRECOGNIZED);
+  const hint = unrecognizedHint(artifact);
+  emit("meta/unrecognized-artifact", null, hint ? `${hint} ${UNRECOGNIZED}` : UNRECOGNIZED);
   return { findings, summary: `${fileArg}  [unknown]` };
 }
 

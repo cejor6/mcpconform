@@ -3,6 +3,7 @@
 // module stays free of filesystem access (the CLI reads the sibling file).
 
 import { isSecretName } from "./secrets.mjs";
+import { show } from "./text.mjs";
 
 const REGISTRY_TYPES = ["npm", "pypi", "cargo", "nuget", "oci", "mcpb"];
 const TRANSPORT_TYPES = ["stdio", "streamable-http", "sse"];
@@ -15,10 +16,10 @@ export function runServerJsonRules(doc, emit, opts = {}) {
 
   if (typeof doc.name !== "string" || !REVDNS.test(doc.name))
     emit("server-json/name-reverse-dns", null,
-      `name "${doc.name ?? ""}" should be reverse-DNS, e.g. io.github.you/server.`);
+      `name "${show(doc.name ?? "")}" should be reverse-DNS, e.g. io.github.you/server.`);
 
   if (typeof doc.version !== "string" || !SEMVER.test(doc.version))
-    emit("server-json/version-semver", null, `version "${doc.version ?? ""}" should be semver (e.g. 1.2.0).`);
+    emit("server-json/version-semver", null, `version "${show(doc.version ?? "")}" should be semver (e.g. 1.2.0).`);
 
   const pkgs = Array.isArray(doc.packages) ? doc.packages : [];
   const remotes = Array.isArray(doc.remotes) ? doc.remotes : [];
@@ -33,22 +34,22 @@ export function runServerJsonRules(doc, emit, opts = {}) {
     }
     if (!REGISTRY_TYPES.includes(p.registryType))
       emit("server-json/registry-type-enum", at,
-        `registryType "${p.registryType}" must be one of ${REGISTRY_TYPES.join("|")}.`);
+        `registryType "${show(p.registryType)}" must be one of ${REGISTRY_TYPES.join("|")}.`);
     if (p.registryType === "mcpb" && !p.fileSha256)
       emit("server-json/mcpb-sha", at, "fileSha256 is required for mcpb packages.");
 
     const tr = p.transport || {};
     if (tr.type && !TRANSPORT_TYPES.includes(tr.type))
       emit("server-json/transport-type-enum", at,
-        `transport.type "${tr.type}" must be one of ${TRANSPORT_TYPES.join("|")}.`);
+        `transport.type "${show(tr.type)}" must be one of ${TRANSPORT_TYPES.join("|")}.`);
     if ((tr.type === "streamable-http" || tr.type === "sse") && !tr.url)
-      emit("server-json/transport-url", at, `transport.url is required for ${tr.type}.`);
+      emit("server-json/transport-url", at, `transport.url is required for ${show(tr.type)}.`);
     if (typeof tr.url === "string" && /^http:\/\//i.test(tr.url))
       emit("server-json/url-https", at, "transport.url should use https.");
 
     if (p.version && doc.version && p.version !== doc.version)
       emit("server-json/version-matches-package", at,
-        `package version ${p.version} != root version ${doc.version}.`);
+        `package version ${show(p.version)} != root version ${show(doc.version)}.`);
 
     for (const key of ["packageArguments", "runtimeArguments"])
       if (Array.isArray(p[key]))
@@ -71,7 +72,7 @@ export function runServerJsonRules(doc, emit, opts = {}) {
       return;
     }
     if (!REMOTE_TYPES.includes(r.type))
-      emit("server-json/transport-type-enum", at, `remote type "${r.type}" must be one of ${REMOTE_TYPES.join("|")}.`);
+      emit("server-json/transport-type-enum", at, `remote type "${show(r.type)}" must be one of ${REMOTE_TYPES.join("|")}.`);
     if (!r.url) emit("server-json/transport-url", at, "remote url is required.");
     if (typeof r.url === "string" && /^http:\/\//i.test(r.url))
       emit("server-json/url-https", at, "remote url should use https.");
@@ -79,5 +80,5 @@ export function runServerJsonRules(doc, emit, opts = {}) {
 
   if (opts.packageVersion && doc.version && opts.packageVersion !== doc.version)
     emit("server-json/version-matches-package", null,
-      `root version ${doc.version} != sibling package manifest version ${opts.packageVersion}.`);
+      `root version ${show(doc.version)} != sibling package manifest version ${opts.packageVersion}.`);
 }
