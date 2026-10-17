@@ -72,6 +72,15 @@
       "good": "{ \"type\": \"object\", \"properties\": { \"q\": { \"type\": \"string\" } } }"
     },
     {
+      "id": "tool/input-schema-unchecked",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "tools spec > JSON Schema usage (default draft 2020-12; other dialects are client-dependent)",
+      "message": "inputSchema validity could not be checked: it declares a $schema dialect mcpconform cannot validate (draft-04/03 or an unrecognized URI; 2020-12, 2019-09, draft-07 and draft-06 are supported), or it nests too deeply to compile. Distinct from invalid.",
+      "bad": "{ \"$schema\": \"http://json-schema.org/draft-04/schema#\", \"type\": \"object\" }",
+      "good": "omit $schema (2020-12 is the MCP default) or declare draft 2020-12"
+    },
+    {
       "id": "tool/required-references-properties",
       "tier": "error",
       "appliesTo": "tool",

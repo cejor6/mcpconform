@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runCoreRules, runProviderRules } from "../src/rules.mjs";
+import { validateInputSchema, runSchemaValidity } from "../src/schema.mjs";
 import { loadProfileDir, loadAllProfiles, validateProfile, portableProfileIds, SHIPPED_PROFILES_DIR } from "../src/profiles.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const profile = (id) => JSON.parse(readFileSync(join(ROOT, "profiles", `${id}.json`), "utf8"));
@@ -102,4 +103,60 @@ test("--portable: includes generic-strict, excludes the unverified stub", () => 
   assert.equal(r.code, 0);
   assert.match(r.out, /targets: .*generic-strict/);
   assert.doesNotMatch(r.out, /mistral/);
+});
+
+// --- schema dialects, depth, caching --------------------------------------------
+
+test("schema: 2019-09, draft-07 and draft-06 $schema validate (no 'no schema with key or ref')", () => {
+  const body = { type: "object", properties: { a: { type: "string" } } };
+  for (const d of [
+    "https://json-schema.org/draft/2019-09/schema",
+    "http://json-schema.org/draft-07/schema#",
+    "http://json-schema.org/draft-06/schema#",
+    "https://json-schema.org/draft/2020-12/schema",
+    "http://json-schema.org/draft/2020-12/schema", // http spelling of the 2020-12 URI
+  ]) {
+    const r = validateInputSchema({ $schema: d, ...body });
+    assert.deepEqual(r, { ok: true }, d);
+  }
+  // still catches genuinely invalid schemas in the non-default dialects
+  assert.equal(validateInputSchema({ $schema: "https://json-schema.org/draft/2019-09/schema", type: "frobnicate" }).ok, false);
+  assert.equal(validateInputSchema({ $schema: "http://json-schema.org/draft-06/schema#", type: "object", properties: "nope" }).ok, false);
+});
+
+test("schema: draft-04 / unknown $schema -> input-schema-unchecked warning, not invalid", () => {
+  for (const d of ["http://json-schema.org/draft-04/schema#", "https://example.com/my-meta"]) {
+    const f = [];
+    runSchemaValidity([{ name: "t", inputSchema: { $schema: d, type: "object" } }], collectInto(f));
+    assert.deepEqual(ids(f), ["tool/input-schema-unchecked"], d);
+  }
+});
+
+test("schema: a ~1500-deep schema is 'unchecked', not invalid (no stack-overflow false positive)", () => {
+  let deep = { type: "string" };
+  for (let i = 0; i < 1500; i++) deep = { type: "object", properties: { a: deep } };
+  const f = [];
+  runSchemaValidity([{ name: "deep", inputSchema: deep }], collectInto(f));
+  assert.deepEqual(ids(f), ["tool/input-schema-unchecked"]);
+  assert.match(f[0].message, /nested too deeply/);
+  // the engine still works afterwards
+  assert.deepEqual(validateInputSchema({ type: "object" }), { ok: true });
+});
+
+test("schema: shared ajv instance does not leak $ids between tools", () => {
+  const s = () => ({ $id: "https://example.com/s", type: "object", properties: { a: { $id: "https://example.com/n", type: "string" } } });
+  for (let i = 0; i < 3; i++) assert.deepEqual(validateInputSchema(s()), { ok: true });
+});
+
+test("schema: 2000 tools validate quickly (one cached ajv per dialect)", () => {
+  const tools = Array.from({ length: 2000 }, (_, i) => ({
+    name: `t${i}`,
+    inputSchema: { type: "object", properties: { a: { type: "string", format: "email" }, b: { $ref: "#/$defs/x" } }, $defs: { x: { type: "integer" } } },
+  }));
+  const t0 = Date.now();
+  const f = [];
+  runSchemaValidity(tools, collectInto(f));
+  const ms = Date.now() - t0;
+  assert.deepEqual(f, []);
+  assert.ok(ms < 10000, `took ${ms}ms`); // ~2s locally; was ~30s with an Ajv per tool. Generous bound for slow CI.
 });
