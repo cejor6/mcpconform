@@ -11,7 +11,6 @@
   "tools": { "maxCount": 128, "maxTotalBytes": null },
   "inputSchema": {
     "dialect": "draft-2020-12",
-    "rootMustBeObject": true,
     "allowsRefs": true,
     "allowsRecursion": true,
     "allowsAnyOf": true,

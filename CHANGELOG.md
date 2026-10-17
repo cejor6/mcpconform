@@ -15,6 +15,11 @@ All notable changes to mcpconform are documented here. The format follows
 ### Added
 - GitHub Action inputs `min-severity`, `config`, and `fail-on-error`
   (`fail-on-error: false` only passes when the SARIF report was written).
+- Profiles (shipped and from `profilesDir`) are validated against `profile.schema.json` on load; an invalid one exits 2 naming the file, and a `profilesDir` profile overriding a shipped id warns.
+- Previously documented but unimplemented checks: `inputSchema.allowsRecursion`, `maxProperties` (new warn-tier `provider/schema-max-properties`), `supportedStringFormats` (strict mode), `toolName.caseSensitive` (new `provider/name-case-collision`), `idempotentHint:false` + `readOnlyHint:true` in `tool/annotations-consistency`, and a long-hex pattern in `client-config/no-hardcoded-secrets`.
+
+### Breaking (profiles)
+- Profiles are now validated on load (see Added). A custom `profilesDir` profile that loaded before can now stop the run with exit 2 if it has unknown fields (other than `_`-prefixed comment keys such as `_comment`, which are allowed), lacks `kind` or `verified`, has `verified: true` without `source`/`lastVerified`, or has an uncompilable `toolName.pattern`. JSON files in `profilesDir` without an `id` (e.g. a `package.json`) are skipped with a warning rather than rejected.
 
 ### Breaking (Action)
 Users on the floating `@v1` tag pick these up automatically:
@@ -32,6 +37,22 @@ Users on the floating `@v1` tag pick these up automatically:
 ### Changed
 - README Action example uploads SARIF with `if: always()`, so findings that
   fail the step still reach code scanning.
+
+### Fixed
+- `generic-strict` was unsatisfiable: its keyword allowlist omitted `additionalProperties` (which its own strict block requires) and `title`, so even `examples/tools.good.json` failed it.
+- `--portable` now checks every **verified** profile, including `generic-strict`; the unverified `mistral` stub is no longer included (previously the reverse).
+- `inputSchema`s declaring draft 2019-09 or draft-06 were reported invalid ("no schema with key or ref"); they now validate. draft-04/03 and unrecognized `$schema` URIs, and schemas nested too deeply to compile, get the new `tool/input-schema-unchecked` warning instead of a false `tool/input-schema-valid` error.
+- Schema validation reuses one Ajv instance per dialect (2000 tools: ~30s → ~2s).
+- `server-json/env-secret-flag` no longer fires on `MAX_TOKENS`, `TOKEN_LIMIT`, `AUTHOR`, `PARTITION_KEY`, `SORT_KEY`, `STRIPE_PUBLISHABLE_KEY`, …: secret words match as whole words or run-together endings (`ACCESSTOKEN`, `CLIENTSECRET` still match), and `KEY` counts only with a secret-ish qualifier (`API_KEY`, `PRIVATE_KEY`).
+- `tool/destructive-needs-annotation` also catches camelCase (`deleteUser`), suffixed two-word (`user_delete`) and bare (`delete`) verbs, without flagging field-like or compound-noun names (`reset_at`, `price_drop`, `status_update`, `suggest_move`).
+- `tool/no-params-shape` also flags `{ "type": "object", "properties": {} }` without `additionalProperties: false`, but no longer flags map-style tools (`additionalProperties: <schema>` or `patternProperties`).
+- A schema nested thousands deep no longer crashes the run when a provider target is set; it is reported as `tool/input-schema-unchecked`.
+
+### Removed
+- `client-config/valid-json` from `rules.json` (it was never emitted; parse failures are `meta/parse-error`). `inputSchema.rootMustBeObject` is deprecated and ignored (the core `tool/input-schema-root-object` rule already enforces it).
+
+### Notes
+- The OpenAI profile's strict-mode limits (`maxProperties: 100`, `maxNestingDepth: 5`, and `format`/`pattern` being rejected) should be re-verified against OpenAI's current structured-outputs docs, which may have raised them; until then `provider/schema-max-properties` is warn-tier so a stale number cannot newly fail a build. The profile numbers and `verified` flags were not changed.
 
 ## [0.2.1] - 2026-07-12
 

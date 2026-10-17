@@ -2,14 +2,13 @@
 // the optional sibling-manifest version cross-check is passed in via opts so this
 // module stays free of filesystem access (the CLI reads the sibling file).
 
+import { isSecretName } from "./secrets.mjs";
+
 const REGISTRY_TYPES = ["npm", "pypi", "cargo", "nuget", "oci", "mcpb"];
 const TRANSPORT_TYPES = ["stdio", "streamable-http", "sse"];
 const REMOTE_TYPES = ["streamable-http", "sse"];
 const SEMVER = /^\d+\.\d+\.\d+(?:[-+].+)?$/;
 const REVDNS = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+\/[A-Za-z0-9._-]+$/;
-const SECRET_NAME = /(api[_-]?key|secret|token|password|passwd|credential|private[_-]?key|pem|auth)/i;
-// Names that *look* secret-ish but are identifiers/paths/flags, not the secret itself.
-const NON_SECRET_SUFFIX = /(_id|_path|_name|_user|_username|_public|_enabled|_url|_uri|_host|_port|_region|_env)$/i;
 
 export function runServerJsonRules(doc, emit, opts = {}) {
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) return;
@@ -56,7 +55,7 @@ export function runServerJsonRules(doc, emit, opts = {}) {
 
     if (Array.isArray(p.environmentVariables))
       p.environmentVariables.forEach((e) => {
-        if (e && typeof e.name === "string" && SECRET_NAME.test(e.name) && !NON_SECRET_SUFFIX.test(e.name) && e.isSecret !== true)
+        if (e && typeof e.name === "string" && isSecretName(e.name) && e.isSecret !== true)
           emit("server-json/env-secret-flag", `${at}.env.${e.name}`, "Secret-looking env var should set isSecret:true.");
       });
   });

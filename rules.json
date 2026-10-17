@@ -6,7 +6,7 @@
     "warn": "MCP spec SHOULD, or a high-value correctness convention.",
     "info": "Opinionated quality; default-on but downgradeable. AI-judged rules slot in here later."
   },
-  "notes": "provider/* rules are PARAMETERIZED and provider-agnostic: each reads the active profile(s) declared in config.targets (or every profile under --portable). They are inert when no target is set. `reads` names the profile field consulted. No vendor is hardcoded in the engine.",
+  "notes": "provider/* rules are PARAMETERIZED and provider-agnostic: each reads the active profile(s) declared in config.targets (or every verified profile under --portable). They are inert when no target is set. `reads` names the profile field consulted. No vendor is hardcoded in the engine.",
   "rules": [
     {
       "id": "tool/name-required",
@@ -72,6 +72,15 @@
       "good": "{ \"type\": \"object\", \"properties\": { \"q\": { \"type\": \"string\" } } }"
     },
     {
+      "id": "tool/input-schema-unchecked",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "source": "tools spec > JSON Schema usage (default draft 2020-12; other dialects are client-dependent)",
+      "message": "inputSchema validity could not be checked: it declares a $schema dialect mcpconform cannot validate (draft-04/03 or an unrecognized URI; 2020-12, 2019-09, draft-07 and draft-06 are supported), or it nests too deeply to compile. Distinct from invalid.",
+      "bad": "{ \"$schema\": \"http://json-schema.org/draft-04/schema#\", \"type\": \"object\" }",
+      "good": "omit $schema (2020-12 is the MCP default) or declare draft 2020-12"
+    },
+    {
       "id": "tool/required-references-properties",
       "tier": "error",
       "appliesTo": "tool",
@@ -85,8 +94,8 @@
       "tier": "info",
       "appliesTo": "tool",
       "source": "tools spec (Recommended form for zero-param tools)",
-      "message": "Zero-parameter tools should use { type: object, additionalProperties: false }.",
-      "bad": "{}",
+      "message": "Zero-parameter tools (no properties, or properties: {}) should use { type: object, additionalProperties: false }. Map-style schemas (additionalProperties: <schema>, or patternProperties) are exempt.",
+      "bad": "{ \"type\": \"object\", \"properties\": {} }",
       "good": "{ \"type\": \"object\", \"additionalProperties\": false }"
     },
     {
@@ -148,7 +157,7 @@
       "tier": "warn",
       "appliesTo": "tool",
       "source": "schema.ts ToolAnnotations + tools spec (clients MUST treat annotations as untrusted)",
-      "message": "Mutating-verb tool name lacks annotations (destructiveHint defaults to TRUE; readOnly tools should say so).",
+      "message": "Mutating-verb tool name lacks annotations (destructiveHint defaults to TRUE; readOnly tools should say so). The verb is matched as a whole word: leading (delete_order, deleteOrder, delete) or trailing (order_delete).",
       "bad": "\"delete_order\" with no annotations",
       "good": "annotations: { \"destructiveHint\": true } (or readOnlyHint:true for queries)"
     },
@@ -157,8 +166,8 @@
       "tier": "info",
       "appliesTo": "tool",
       "source": "schema.ts ToolAnnotations field comments",
-      "message": "destructiveHint/idempotentHint are meaningful only when readOnlyHint is false.",
-      "bad": "{ \"readOnlyHint\": true, \"destructiveHint\": true }",
+      "message": "destructiveHint/idempotentHint are meaningful only when readOnlyHint is false; flags readOnlyHint:true combined with destructiveHint:true or idempotentHint:false.",
+      "bad": "{ \"readOnlyHint\": true, \"destructiveHint\": true }  or  { \"readOnlyHint\": true, \"idempotentHint\": false }",
       "good": "{ \"readOnlyHint\": true }"
     },
     {
@@ -229,6 +238,17 @@
       "good": "<=64 chars"
     },
     {
+      "id": "provider/name-case-collision",
+      "tier": "error",
+      "appliesTo": "tool-set",
+      "family": "provider",
+      "reads": "toolName.caseSensitive",
+      "source": "active profile(s)",
+      "message": "Two tool names differ only by case, and the targeted consumer compares names case-insensitively (inert unless a profile sets caseSensitive:false).",
+      "bad": "\"Search\" and \"search\"",
+      "good": "\"search_web\" and \"search_docs\""
+    },
+    {
       "id": "provider/description-length",
       "tier": "error",
       "appliesTo": "tool",
@@ -264,9 +284,9 @@
       "tier": "error",
       "appliesTo": "tool",
       "family": "provider",
-      "reads": "inputSchema.supportedKeywords | inputSchema.unsupportedKeywords",
+      "reads": "inputSchema.supportedKeywords | inputSchema.unsupportedKeywords | inputSchema.supportedStringFormats (strict mode)",
       "source": "active profile(s)",
-      "message": "inputSchema uses a keyword the targeted consumer rejects (allowlist or denylist).",
+      "message": "inputSchema uses a keyword the targeted consumer rejects (allowlist or denylist), or — in strict mode — a `format` value outside the profile's supportedStringFormats.",
       "bad": "anyOf in a gemini target (not in its supportedKeywords)",
       "good": "restructure without anyOf, or drop the gemini target"
     },
@@ -316,13 +336,24 @@
       "good": "flatten to <=5 levels"
     },
     {
+      "id": "provider/schema-max-properties",
+      "tier": "warn",
+      "appliesTo": "tool",
+      "family": "provider",
+      "reads": "inputSchema.maxProperties | strict.maxProperties",
+      "source": "active profile(s)",
+      "message": "inputSchema declares more object properties in total (summed over every nested object) than the targeted consumer allows.",
+      "bad": "120 properties vs openai strict max 100",
+      "good": "split the tool or flatten optional groups"
+    },
+    {
       "id": "provider/schema-no-refs",
       "tier": "error",
       "appliesTo": "tool",
       "family": "provider",
       "reads": "inputSchema.allowsRefs / allowsRecursion / allowsAnyOf",
       "source": "active profile(s)",
-      "message": "inputSchema uses $ref / recursion / anyOf that the targeted consumer does not allow.",
+      "message": "inputSchema uses $ref / recursion / anyOf that the targeted consumer does not allow. Recursion (a $ref to \"#\", $dynamicRef/$recursiveRef, or a cycle among local $defs) is checked only where $ref itself is allowed.",
       "bad": "$ref in a gemini (baseline) target",
       "good": "inline the definition"
     },
@@ -421,13 +452,6 @@
     },
 
     {
-      "id": "client-config/valid-json",
-      "tier": "error",
-      "appliesTo": "client-config",
-      "source": "client config convention (no MCP spec)",
-      "message": "Config must parse as JSON (JSONC where the client allows)."
-    },
-    {
       "id": "client-config/one-transport",
       "tier": "error",
       "appliesTo": "client-config",
@@ -466,7 +490,7 @@
       "tier": "warn",
       "appliesTo": "client-config",
       "source": "security convention (secret-scan tie-in)",
-      "message": "Secret-looking literal in env/headers (sk-, ghp_, AKIA, JWT, long hex). Reference an env var instead.",
+      "message": "Secret-looking literal in env/headers (sk-, ghp_, AKIA, JWT, or a 32+ char hex value under a secret-named key such as API_KEY). Reference an env var instead.",
       "bad": "\"API_KEY\": \"sk-live-abc123\"",
       "good": "\"API_KEY\": \"${API_KEY}\""
     },
@@ -516,7 +540,7 @@
       "tier": "error",
       "appliesTo": "meta",
       "source": "engine",
-      "message": "The artifact could not be parsed as JSON."
+      "message": "The artifact (tools dump, server.json, or client config) could not be parsed as JSON. Covers client-config parse failures too: the artifact type can't be detected from an unparsable file."
     }
   ]
 }

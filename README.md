@@ -73,7 +73,7 @@ mcpconform server.json .mcp.json tools.json --target anthropic,openai
 ```
 
 - `--target a,b` — provider profiles to check against. Empty = pure MCP-spec checks.
-- `--portable` — must satisfy the strictest common denominator of every major provider.
+- `--portable` — check every **verified** profile at once, including the synthetic `generic-strict` (strictest common denominator of the verified providers). Unverified stubs (e.g. `mistral`) are skipped so a guessed constraint can never fail a portability gate; target them explicitly with `--target` if you want them.
 - `--mode strict` — also apply each provider's strict-mode constraints.
 - `--format sarif --out file.sarif` — emit SARIF for GitHub code scanning.
 - `--min-severity error|warn|info` — report only findings at or above this tier. This is a **display filter**, not a fail-gate: the exit code is unaffected — only `error`-tier findings ever fail a run. Also settable as `minSeverity` in config. Handy in CI to drop info-tier noise without per-rule `off` suppressions.
@@ -140,7 +140,7 @@ The engine knows nothing about any specific LLM vendor. Every *consumer* of a to
 --target (none)                      -> pure MCP spec (default, fully agnostic)
 --target anthropic                   -> one consumer
 --target anthropic,openai            -> portable: tool must satisfy BOTH
---portable                           -> survives every major provider
+--portable                           -> every verified profile (incl. generic-strict)
 ```
 
 ### Shipped profiles
@@ -150,10 +150,12 @@ The engine knows nothing about any specific LLM vendor. Every *consumer* of a to
 | `anthropic` | llm-provider | ✅ | `^[a-zA-Z0-9_-]{1,64}$` | strict mode drops min/max/length + recursion |
 | `openai` | llm-provider | ✅ | `^[a-zA-Z0-9_-]{1,64}$` | description ≤1024; strict = addlProps:false + all-required, depth ≤5 |
 | `gemini` | llm-provider | ✅ | `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$` | OpenAPI-3.0 subset (allowlist); no anyOf/$ref baseline |
-| `mistral` | llm-provider | ⛔ stub | — | demonstrates the extension pattern |
-| `generic-strict` | synthetic | ✅ | `^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$` | strictest common denominator (`--portable`) |
+| `mistral` | llm-provider | ⛔ stub | — | demonstrates the extension pattern; not in `--portable` |
+| `generic-strict` | synthetic | ✅ (derived) | `^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$` | strictest common denominator of the verified profiles; included in `--portable` |
 
-`verified: true` means every constraint was read from that consumer's own docs (cited in `source`). Findings from a `verified: false` profile are flagged by `meta/profile-unverified`, so a guessed number never reads as fact.
+`verified: true` means every constraint was read from that consumer's own docs (cited in `source`); for the synthetic `generic-strict` it means every constraint is derived from verified profiles. Findings from a `verified: false` profile are flagged by `meta/profile-unverified`, so a guessed number never reads as fact.
+
+Every profile — shipped or loaded from `profilesDir` in config — is validated against `profiles/profile.schema.json` when it loads. An invalid profile (bad JSON, a schema violation, an uncompilable name pattern, or a duplicate id within one directory) stops the run with exit `2` and names the file; a `profilesDir` profile that reuses a shipped id (e.g. your own `anthropic.json`) overrides it with a warning on stderr.
 
 ### The flagship divergence this catches
 
