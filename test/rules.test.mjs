@@ -528,6 +528,7 @@ test("cli: SARIF driver.version tracks package.json (no drift)", () => {
 // `node --test` over several files can drop the tail of one file's tests when
 // another file finishes first.
 import { mkdtempSync } from "node:fs";
+import { loadAllProfiles } from "../src/profiles.mjs";
 const RTMP = mkdtempSync(join(tmpdir(), "mcpconform-robust-"));
 function rrun(a, nodeArgs = []) {
   const r = spawnSync(process.execPath, [...nodeArgs, join(ROOT, "src/index.mjs"), ...a], {
@@ -717,12 +718,34 @@ test("core: a non-array tools value is ignored, not a crash", () => {
   assert.doesNotThrow(() => runCoreRules({}, () => {}));
 });
 
-test("provider: an invalid toolName.pattern is reported as meta/profile-invalid", () => {
-  const f = [];
-  const prof = { id: "custom", toolName: { pattern: "(", maxLength: 3 } };
-  runProviderRules([{ name: "longname", description: "d", inputSchema: { type: "object" } }], [prof], (id) => f.push(id));
-  assert.ok(f.includes("meta/profile-invalid"));
-  assert.ok(f.includes("provider/name-length")); // the profile's other checks still run
+// A bad toolName.pattern is rejected once, at profile load (profiles.mjs:
+// ProfileError -> exit 2); there is no separate runtime rule for it.
+test("cli: a profilesDir profile with an uncompilable toolName.pattern exits 2 at load", () => {
+  const dir = mkdtempSync(join(RTMP, "prof-"));
+  writeFileSync(join(dir, "bad.json"), JSON.stringify({ id: "badpat", kind: "llm-provider", verified: false, toolName: { pattern: "(" } }));
+  const cfg = rfile({ profilesDir: dir });
+  const r = rrun(["examples/tools.good.json", "--config", cfg, "--target", "badpat"]);
+  noStack(r);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /toolName\/pattern is not a valid regular expression/);
+});
+
+test("profiles: an id that is an Object.prototype key is an ordinary profile", () => {
+  const dir = mkdtempSync(join(RTMP, "prof-"));
+  writeFileSync(join(dir, "ctor.json"), JSON.stringify({ id: "constructor", kind: "llm-provider", verified: false, toolName: { maxLength: 3 } }));
+  // Used to fail as a false "duplicate profile id" (inherited Object.prototype.constructor).
+  const { profiles } = loadAllProfiles(dir);
+  assert.ok(Object.hasOwn(profiles, "constructor"));
+  assert.equal(profiles.constructor.toolName.maxLength, 3);
+  assert.ok(!Object.hasOwn(profiles, "toString"));
+  const cfg = rfile({ profilesDir: dir });
+  const r = rrun(["examples/tools.good.json", "--config", cfg, "--target", "constructor"]);
+  assert.equal(r.code, 1); // the profile is applied like any other
+  assert.match(r.out, /provider\/name-length <constructor>/);
+  // and "__proto__" can never be an id (schema pattern), so it is a usage error
+  const r2 = rrun(["examples/tools.good.json", "--target", "__proto__"]);
+  assert.equal(r2.code, 2);
+  assert.match(r2.out, /unknown target profile/);
 });
 
 test("schema: a 3000-deep inputSchema is walked without a stack overflow", () => {
@@ -743,6 +766,9 @@ test("cli: a deeply nested schema file is linted, not crashed", () => {
   noStack(r);
   assert.equal(r.code, 1);
   assert.match(r.out, /provider\/schema-max-depth/);
+  // Ajv's stack overflow is reported as "unchecked", never as an invalid schema.
+  assert.match(r.out, /tool\/input-schema-unchecked/);
+  assert.doesNotMatch(r.out, /tool\/input-schema-valid|Maximum call stack/);
 });
 
 // --- inspect robustness ---
@@ -869,4 +895,21 @@ test("cli: a report larger than the 64KB pipe buffer is not truncated", () => {
   const r = rrun([rfile({ tools }), "--format", "sarif"]);
   assert.ok(r.stdout.length > 65536, `only ${r.stdout.length} bytes`);
   assert.equal(JSON.parse(r.stdout).runs[0].results.length, 800);
+});
+
+test("redos: name splitting (secret names, mutating verbs) is linear on a 300KB capitals run", async () => {
+  const { nameWords } = await import("../src/names.mjs");
+  fast(() => nameWords("A".repeat(300000)), 1000);
+  // Differential check against the original quadratic regex.
+  const orig = (s) =>
+    String(s).replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+      .split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w.toLowerCase());
+  const alphabet = ["A", "B", "a", "b", "_", "1", "HTTP", "Get", "x"];
+  let seed = 11;
+  const rnd = (k) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % k);
+  for (let i = 0; i < 3000; i++) {
+    let v = "";
+    for (let j = rnd(20); j > 0; j--) v += alphabet[rnd(alphabet.length)];
+    assert.deepEqual(nameWords(v), orig(v), JSON.stringify(v));
+  }
 });

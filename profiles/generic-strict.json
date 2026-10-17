@@ -11,8 +11,7 @@
   "tools": { "maxCount": 128, "maxTotalBytes": null },
   "inputSchema": {
     "dialect": "subset",
-    "rootMustBeObject": true,
-    "supportedKeywords": ["type", "description", "properties", "items", "required", "enum", "nullable", "format"],
+    "supportedKeywords": ["type", "description", "properties", "items", "required", "enum", "nullable", "format", "additionalProperties", "title"],
     "allowsRefs": false,
     "allowsRecursion": false,
     "allowsAnyOf": false,
@@ -25,5 +24,5 @@
     "maxNestingDepth": 5,
     "maxProperties": 100
   },
-  "notes": "Pre-computed strictest-common-denominator so a server author can lint for 'works on every major provider' without naming each one (`--portable`). Name: no dots (Anthropic + OpenAI forbid), no leading digit (Gemini forbids), <=64 chars. Schema: an OpenAPI-ish subset that survives Gemini's allowlist AND OpenAI strict mode simultaneously. The engine can also compute this intersection on the fly from `targets`; this file is the convenience default."
+  "notes": "Pre-computed strictest-common-denominator so a server author can lint for 'works on every major provider' without naming each one (`--portable`). Name: no dots (Anthropic + OpenAI forbid), no leading digit (Gemini forbids), <=64 chars. Schema: an OpenAPI-ish subset that survives Gemini's allowlist AND OpenAI strict mode simultaneously. additionalProperties and title are in the allowlist because strict mode REQUIRES additionalProperties:false (leaving it out made the profile unsatisfiable) and, per gemini.json's classification of both as ignoredKeywords (dropped silently, not rejected), every verified profile accepts them without error. If that classification changes, revisit this allowlist. The engine can also compute this intersection on the fly from `targets`; this file is the convenience default."
 }

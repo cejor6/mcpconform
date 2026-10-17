@@ -8,9 +8,44 @@
 // Severity is resolved by the caller from rules.json + config overrides.
 
 import { checkProviderSchema } from "./schema.mjs";
+import { nameWords } from "./names.mjs";
 
-const MUTATING =
-  /^(delete|remove|drop|destroy|cancel|purge|reset|revoke|send|place|create|update|set|write|edit|move|rename)[_-]/i;
+// Mutating-verb detection on TOOL NAMES (never property names). The name is
+// split into words on _ - . and camelCase boundaries, and a verb must be a whole
+// word ("updated"/"settings" never match):
+//   - a leading verb counts (delete_user, deleteUser, delete), except a bare
+//     verb + timestamp/owner/id word (reset_at, update_by, delete_id), which
+//     names a field, not an action;
+//   - a trailing verb counts only in a two-word name (user_delete) whose first
+//     word is not itself a verb of inspection (get_/list_/suggest_/evaluate_...)
+//     and that isn't a compound noun (price_drop, status_update, auto_update).
+//     "set"/"place" never count as suffixes (data_set, market_place).
+const MUTATING_VERBS = new Set([
+  "delete", "remove", "drop", "destroy", "cancel", "purge", "reset", "revoke", "send", "place",
+  "create", "update", "set", "write", "edit", "move", "rename",
+]);
+const NOUNLIKE_SUFFIX = new Set(["set", "place"]);
+const FIELD_SUFFIX = new Set(["at", "by", "id", "on"]);
+const READ_VERBS = new Set([
+  "get", "list", "read", "fetch", "find", "search", "query", "lookup", "describe", "show", "view",
+  "check", "is", "has", "can", "count", "preview", "validate", "watch", "inspect", "suggest",
+  "evaluate", "estimate", "simulate", "explain", "analyze", "compare", "predict", "recommend",
+]);
+// first words that turn a trailing drop/move/update into a compound noun
+const COMPOUND_NOUN_HEAD = new Set(["status", "auto", "price"]);
+export function isMutatingName(name) {
+  const w = nameWords(name);
+  if (!w.length) return false;
+  if (MUTATING_VERBS.has(w[0])) return !(w.length === 2 && FIELD_SUFFIX.has(w[1]));
+  if (w.length !== 2) return false;
+  const [first, last] = w;
+  return (
+    MUTATING_VERBS.has(last) &&
+    !NOUNLIKE_SUFFIX.has(last) &&
+    !READ_VERBS.has(first) &&
+    !(COMPOUND_NOUN_HEAD.has(first) && ["drop", "move", "update"].includes(last))
+  );
+}
 
 // --- core (agnostic) -------------------------------------------------------
 export function runCoreRules(tools, emit) {
@@ -55,7 +90,7 @@ export function runCoreRules(tools, emit) {
       }
     }
 
-    if (typeof t.name === "string" && MUTATING.test(t.name)) {
+    if (typeof t.name === "string" && isMutatingName(t.name)) {
       const a = t.annotations;
       const ok = a && (typeof a.destructiveHint === "boolean" || a.readOnlyHint === true);
       if (!ok)
@@ -63,8 +98,13 @@ export function runCoreRules(tools, emit) {
           "Mutating-verb tool lacks annotations (destructiveHint defaults to TRUE).");
     }
 
-    // zero-parameter tool shape (info)
-    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && !s.properties && s.additionalProperties !== false)
+    // zero-parameter tool shape (info). `properties: {}` declares no parameters
+    // either, so without additionalProperties:false it still accepts any input.
+    // Map-style tools (additionalProperties: <schema>, or patternProperties)
+    // take their parameters that way on purpose, so they are not zero-param.
+    const noProps = !s?.properties || (typeof s.properties === "object" && !Array.isArray(s.properties) && !Object.keys(s.properties).length);
+    const mapStyle = (s?.additionalProperties && typeof s.additionalProperties === "object") || s?.patternProperties !== undefined;
+    if (s && typeof s === "object" && !Array.isArray(s) && s.type === "object" && noProps && !mapStyle && s.additionalProperties !== false)
       emit("tool/no-params-shape", where, "Zero-parameter tool should set additionalProperties:false to accept only empty input.");
 
     // outputSchema root must be object
@@ -86,8 +126,14 @@ export function runCoreRules(tools, emit) {
     }
 
     // annotation consistency
+    // Per the spec, destructiveHint and idempotentHint are meaningful only when
+    // readOnlyHint is false. Flag the value that contradicts readOnlyHint:true:
+    // destructive, or NON-idempotent (a tool with no effects is trivially idempotent).
     if (t.annotations && t.annotations.readOnlyHint === true && t.annotations.destructiveHint === true)
       emit("tool/annotations-consistency", where, "destructiveHint is meaningful only when readOnlyHint is false.");
+    if (t.annotations && t.annotations.readOnlyHint === true && t.annotations.idempotentHint === false)
+      emit("tool/annotations-consistency", where,
+        "idempotentHint:false contradicts readOnlyHint:true; idempotentHint is meaningful only when readOnlyHint is false.");
 
     // redundant title
     if (typeof t.title === "string" && t.title === t.name)
@@ -123,14 +169,9 @@ export function runProviderRules(tools, profiles, emit, mode = "default") {
   for (const p of profiles) {
     const tn = p.toolName ?? {};
     const td = p.toolDescription ?? {};
-    let re = null;
-    if (tn.pattern) {
-      try {
-        re = new RegExp(tn.pattern);
-      } catch (e) {
-        emit("meta/profile-invalid", null, `profile "${p.id}" toolName.pattern is not a valid regular expression: ${e.message}`, p.id);
-      }
-    }
+    // Compilability is guaranteed by validateProfile() at load (profiles.mjs): an
+    // invalid pattern is a usage error (exit 2) there, so it is not re-checked here.
+    const re = tn.pattern ? new RegExp(tn.pattern) : null;
 
     for (const t of tools) {
       if (!t || typeof t.name !== "string") continue;
@@ -146,6 +187,20 @@ export function runProviderRules(tools, profiles, emit, mode = "default") {
     for (const t of tools) {
       if (t && typeof t === "object" && t.inputSchema && typeof t.inputSchema === "object" && !Array.isArray(t.inputSchema))
         checkProviderSchema(typeof t.name === "string" ? t.name : null, t.inputSchema, p, mode, emit);
+    }
+
+    // A consumer that matches tool names case-insensitively can't tell
+    // "Search" from "search": flag names that differ only by case.
+    if (tn.caseSensitive === false) {
+      const byFold = new Map();
+      for (const t of tools)
+        if (t && typeof t.name === "string") {
+          const k = t.name.toLowerCase();
+          const prev = byFold.get(k);
+          if (prev !== undefined && prev !== t.name)
+            emit("provider/name-case-collision", t.name, `name collides with "${prev}" on ${p.id}, which compares tool names case-insensitively`, p.id);
+          else if (prev === undefined) byFold.set(k, t.name);
+        }
     }
 
     if (p.tools && p.tools.maxCount && tools.length > p.tools.maxCount)

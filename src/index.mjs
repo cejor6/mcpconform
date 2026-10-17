@@ -4,7 +4,7 @@
 // MCP Tool objects against the core spec rules + targeted provider profiles.
 // (server.json / client-config linters and ajv-backed schema rules land next.)
 
-import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { runCoreRules, runProviderRules } from "./rules.mjs";
@@ -12,6 +12,7 @@ import { runSchemaValidity } from "./schema.mjs";
 import { runServerJsonRules } from "./server-json.mjs";
 import { runClientConfigRules } from "./client-config.mjs";
 import { inspectStdio } from "./inspect.mjs";
+import { loadAllProfiles, portableProfileIds } from "./profiles.mjs";
 import { renderHuman, renderSarif, escapeControl } from "./report.mjs";
 
 // Exit codes: 0 = clean, 1 = error-tier findings, 2 = usage error or internal
@@ -88,20 +89,6 @@ function checkEnum(label, value, allowed) {
   if (!allowed.includes(value)) usageError(`${label} must be ${allowed.join("|")} (got ${q(value)})`);
 }
 
-function loadProfiles(dir) {
-  const out = {};
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(".json") || f === "profile.schema.json") continue;
-    try {
-      const p = loadJSON(join(dir, f));
-      if (p.id) out[p.id] = p;
-    } catch {
-      /* skip malformed profile */
-    }
-  }
-  return out;
-}
-
 // "server" followed (anywhere later) by "schema", case-insensitive. Equivalent
 // to /server.*schema/i, which is quadratic on a long "serverserver..." $schema.
 function isServerSchemaUri(s) {
@@ -167,7 +154,8 @@ USAGE
 
 OPTIONS
   --target <a,b>     provider profiles to check against (e.g. anthropic,openai); empty = MCP-spec only
-  --portable         check against every shipped provider profile
+  --portable         check against every verified profile (incl. the synthetic
+                     strictest-common-denominator one); unverified stubs are skipped
   --mode <m>         default | strict (applies each profile's strict{} rules)
   --type <t>         force artifact type: tools | server-json | client-config
   --format <f>       human (default) | sarif
@@ -236,17 +224,26 @@ if (!Array.isArray(configTargets) || configTargets.some((t) => typeof t !== "str
   usageError("config `targets` must be an array of profile ids");
 configTargets = configTargets.map((t) => t.trim()).filter(Boolean);
 
-const allProfiles = loadProfiles(join(ROOT, "profiles"));
-if (config.profilesDir) {
-  const dir = resolve(dirname(cfgPath), config.profilesDir);
-  if (existsSync(dir)) Object.assign(allProfiles, loadProfiles(dir));
+// Every profile (shipped + config.profilesDir) is schema-validated at load; an
+// invalid one is a usage error (exit 2), never a silent skip.
+let allProfiles;
+try {
+  const profilesDir = config.profilesDir ? resolve(dirname(cfgPath), config.profilesDir) : null;
+  if (profilesDir && !existsSync(profilesDir))
+    console.error(`mcpconform: warning: profilesDir ${profilesDir} does not exist; using shipped profiles only`);
+  const loaded = loadAllProfiles(profilesDir && existsSync(profilesDir) ? profilesDir : null);
+  allProfiles = loaded.profiles;
+  for (const w of loaded.warnings) console.error(`mcpconform: warning: ${w}`);
+} catch (e) {
+  if (e.name !== "ProfileError") throw e;
+  console.error(`mcpconform: ${e.message}`);
+  process.exit(2);
 }
 
 let targetIds = args.target.length ? args.target : configTargets;
-if (args.portable || config.portable)
-  targetIds = Object.values(allProfiles)
-    .filter((p) => p.kind !== "spec-baseline" && p.kind !== "synthetic")
-    .map((p) => p.id);
+// --portable: every verified profile, including the synthetic
+// strictest-common-denominator one; unverified stubs are excluded.
+if (args.portable || config.portable) targetIds = portableProfileIds(allProfiles);
 // Own-property lookups only: "constructor" / "toString" are not profiles. An
 // unknown or typo'd target is a usage error, not a warning line that SARIF
 // consumers never see.
