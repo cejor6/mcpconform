@@ -184,7 +184,10 @@ test("cli: a 3000-deep schema with a provider target warns instead of crashing",
     writeFileSync(file, `{"tools":[{"name":"deep","description":"d","inputSchema":${schema}}]}`);
     const r = cli([file, "--target", "openai"]);
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /tool\/input-schema-unchecked <openai> \[deep\]/);
+    // Ajv's compile overflows -> core "unchecked" warning. The provider walk is
+    // iterative, so it completes (no <openai>-scoped "unchecked" fallback needed).
+    assert.match(r.out, /tool\/input-schema-unchecked \[deep\]/);
+    assert.doesNotMatch(r.out, /Maximum call stack|input-schema-valid/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

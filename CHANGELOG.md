@@ -13,6 +13,12 @@ All notable changes to mcpconform are documented here. The format follows
 - Workflows and `action.yml` pin third-party actions to full commit SHAs.
 
 ### Added
+- `meta/internal-error`: a crash while linting one artifact (or rendering the
+  report) is reported, the rest are still linted, and the run exits 2.
+- `meta/empty-artifact` (warn): a tools dump with zero tools or a client config
+  with zero servers. A warning, since prompt/resource-only servers are legitimate.
+- VS Code `settings.json` is detected as a client config and linted through its
+  `"mcp": {"servers": …}` block.
 - GitHub Action inputs `min-severity`, `config`, and `fail-on-error`
   (`fail-on-error: false` only passes when the SARIF report was written).
 - Profiles (shipped and from `profilesDir`) are validated against `profile.schema.json` on load; an invalid one exits 2 naming the file, and a `profilesDir` profile overriding a shipped id warns.
@@ -28,17 +34,51 @@ Users on the floating `@v1` tag pick these up automatically:
   file (via the `config` input) instead of `--portable` / `--expand`; `--type`
   has no Action route now.
 - `files: "inspect -- <cmd>"` is refused; the Action lints files only.
-- `files` entries must be existing files, and a non-empty `config` must exist
-  (the CLI silently ignores a missing `--config`). Both now fail with exit 2.
+- `files` entries must be existing files, and a non-empty `config` must exist.
+  Both now fail with exit 2.
 - `files` paths are no longer glob-expanded by the shell (never documented).
 - `mode` now defaults to empty, so a config file's `mode` is honored instead
   of being overridden with `default`.
 
+### Breaking (CLI)
+- **Exit codes are now 0 / 1 / 2.** `1` means error-tier findings only; `2` is a
+  usage error or an internal failure (a crash used to exit `1`).
+- **Unrecognized artifacts now fail (exit 1)** with `meta/unrecognized-artifact`:
+  an unknown shape (a typo'd `mcpServer`, a server.json with no
+  `packages`/`remotes`/`$schema`, `null`) or one that doesn't match a forced
+  `--type`. These used to pass clean as "0 tools". The message names a likely fix.
+- **An unknown `--target` / config `targets` profile exits 2** (listing the known
+  ones); it used to be a warning line that SARIF never carried.
+- **Unknown options and invalid option values exit 2** instead of being ignored
+  (`--format`, `--mode`, `--type`, `--min-severity`). Single-dash arguments are now
+  options too, so `mcpconform inspect npx -y foo` needs `--`:
+  `mcpconform inspect -- npx -y foo`.
+- **Bad config exits 2:** a missing `--config`, unparseable JSON, `rules`
+  severities outside `error|warn|info|off` (e.g. `"ERROR"`), non-array `targets`,
+  or an invalid `mode` / `minSeverity`. These were silently ignored.
+- **Zero tools / zero servers** is now a `meta/empty-artifact` warning (exit code
+  unchanged unless you raise it to `error` in config).
+
 ### Changed
+- Value options accept `--opt=value`; target lists are trimmed
+  (`"anthropic, openai"`).
+- `inspect` labels the run by the command's basename (`inspect/node (+1 arg)`)
+  instead of echoing the full command line, which can carry secrets.
+- SARIF runs carry `properties.targets` and `properties.summaries`.
 - README Action example uploads SARIF with `if: always()`, so findings that
   fail the step still reach code scanning.
 
 ### Fixed
+- Crashes on malformed input (`null`, `{"tools":"x"}`, `{"packages":[null]}`,
+  object-valued names/versions such as `{"toString": 1}`, deeply nested schemas,
+  an `inspect` server that emits `null` or closes stdin).
+- Quadratic regexes on `$schema`, `${...}` refs, JWT detection, and identifier
+  word-splitting for secret names / mutating verbs (300KB took 20–150s).
+- Control characters from the input are escaped in the human report and SARIF.
+- `Object.prototype` names (`constructor`) in `required`, `--target`,
+  `--min-severity`, and as a `profilesDir` profile id.
+- A UTF-8 BOM no longer fails parsing; config `mode` is no longer ignored;
+  reports over 64KB are no longer truncated when piped.
 - `generic-strict` was unsatisfiable: its keyword allowlist omitted `additionalProperties` (which its own strict block requires) and `title`, so even `examples/tools.good.json` failed it.
 - `--portable` now checks every **verified** profile, including `generic-strict`; the unverified `mistral` stub is no longer included (previously the reverse).
 - `inputSchema`s declaring draft 2019-09 or draft-06 were reported invalid ("no schema with key or ref"); they now validate. draft-04/03 and unrecognized `$schema` URIs, and schemas nested too deeply to compile, get the new `tool/input-schema-unchecked` warning instead of a false `tool/input-schema-valid` error.

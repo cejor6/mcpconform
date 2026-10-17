@@ -61,7 +61,10 @@ export function validateProfile(profile) {
  * same id. Returns { [id]: { profile, file } }.
  */
 export function loadProfileDir(dir, warnings = []) {
-  const out = {};
+  // Null-prototype maps + own-property checks throughout: a profile id such as
+  // "constructor" must not collide with Object.prototype (a false "duplicate
+  // id", or a crash reading an inherited value as a shipped profile).
+  const out = Object.create(null);
   let entries;
   try {
     entries = readdirSync(dir).sort();
@@ -84,7 +87,7 @@ export function loadProfileDir(dir, warnings = []) {
     const problems = validateProfile(profile);
     if (problems.length)
       throw new ProfileError(`invalid profile ${file}:\n  - ${problems.join("\n  - ")}`);
-    if (out[profile.id])
+    if (Object.hasOwn(out, profile.id))
       throw new ProfileError(`duplicate profile id "${profile.id}" in ${out[profile.id].file} and ${file}`);
     out[profile.id] = { profile, file };
   }
@@ -100,10 +103,11 @@ export function loadProfileDir(dir, warnings = []) {
 export function loadAllProfiles(extraDir = null, shippedDir = SHIPPED_PROFILES_DIR) {
   const warnings = [];
   const shipped = loadProfileDir(shippedDir, warnings);
-  const profiles = Object.fromEntries(Object.entries(shipped).map(([id, x]) => [id, x.profile]));
+  const profiles = Object.create(null);
+  for (const [id, x] of Object.entries(shipped)) profiles[id] = x.profile;
   if (extraDir)
     for (const [id, { profile, file }] of Object.entries(loadProfileDir(extraDir, warnings))) {
-      if (shipped[id] && shipped[id].file !== file) {
+      if (Object.hasOwn(shipped, id) && shipped[id].file !== file) {
         warnings.push(`profile "${id}" from ${file} overrides the shipped profile of the same id`);
         if (profile.verified !== true && shipped[id].profile.verified === true)
           warnings.push(`profile "${id}" from ${file} is verified:false, so it is excluded from --portable`);

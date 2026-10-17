@@ -13,48 +13,88 @@ import { runServerJsonRules } from "./server-json.mjs";
 import { runClientConfigRules } from "./client-config.mjs";
 import { inspectStdio } from "./inspect.mjs";
 import { loadAllProfiles, portableProfileIds } from "./profiles.mjs";
-import { renderHuman, renderSarif } from "./report.mjs";
+import { renderHuman, renderSarif, escapeControl } from "./report.mjs";
+import { detectType, vscodeMcpBlock, unrecognizedHint } from "./detect.mjs";
+import { show } from "./text.mjs";
+
+// Exit codes: 0 = clean, 1 = error-tier findings, 2 = usage error or internal
+// failure (bad flag/config, server failed to start, a crash while linting).
+// Anything that escapes the handling below is an internal error, never a
+// "findings" exit 1 that CI could mistake for a normal lint failure.
+const crash = (e) => {
+  const text = String(e?.stack ?? e).split("\n").map(escapeControl).join("\n");
+  console.error(`mcpconform: internal error: ${text}`);
+  process.exit(2);
+};
+process.on("uncaughtException", crash);
+process.on("unhandledRejection", crash);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const loadJSON = (p) => JSON.parse(readFileSync(p, "utf8"));
+// Strip a UTF-8 BOM (common from Windows editors) — JSON.parse rejects it.
+const readText = (p) => readFileSync(p, "utf8").replace(/^\uFEFF/, "");
+const loadJSON = (p) => JSON.parse(readText(p));
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const q = (v) => escapeControl(JSON.stringify(v) ?? String(v));
 
+function usageError(msg) {
+  console.error(`mcpconform: ${msg}`);
+  console.error("Run `mcpconform --help` for usage.");
+  process.exit(2);
+}
+
+// Comma lists tolerate spaces: "a, b" -> ["a", "b"].
+const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+const BOOL_FLAGS = { "--expand": "expand", "--portable": "portable", "--help": "help", "-h": "help", "--version": "version", "-v": "version" };
+const VALUE_FLAGS = {
+  "--target": "target", "--format": "format", "--mode": "mode", "--min-severity": "minSeverity",
+  "--min-tools": "minTools", "--type": "type", "--out": "out", "--env-file": "envFile",
+  "--env": "envKv", "--dump": "dump", "--config": "config",
+};
+
+// Every value flag accepts both `--flag value` and `--flag=value`. Unknown flags
+// and value flags with no value are usage errors (exit 2) rather than silently
+// ignored — a typo'd flag must never turn into a quiet "No findings".
 function parseArgs(argv) {
-  const out = { _: [], rest: [], target: [], format: "human", mode: "default", portable: false };
+  const out = { _: [], rest: [], target: [], format: "human", portable: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--") { out.rest = argv.slice(i + 1); break; }
-    else if (a === "--target") out.target = (argv[++i] || "").split(",").filter(Boolean);
-    else if (a === "--format") out.format = argv[++i];
-    else if (a === "--mode") out.mode = argv[++i];
-    else if (a === "--min-severity") out.minSeverity = argv[++i] ?? "";
-    else if (a === "--min-tools") out.minTools = argv[++i] ?? "";
-    else if (a === "--expand") out.expand = true;
-    else if (a === "--portable") out.portable = true;
-    else if (a === "--type") out.type = argv[++i];
-    else if (a === "--out") out.out = argv[++i];
-    else if (a === "--env-file") out.envFile = argv[++i];
-    else if (a === "--env") (out.envKv = out.envKv || []).push(argv[++i]);
-    else if (a === "--dump") out.dump = argv[++i];
-    else if (a === "--config") out.config = argv[++i];
-    else if (a === "--help" || a === "-h") out.help = true;
-    else if (a === "--version" || a === "-v") out.version = true;
-    else if (!a.startsWith("--")) out._.push(a);
+    if (a === "-" || !a.startsWith("-")) { out._.push(a); continue; }
+    const eq = a.startsWith("--") ? a.indexOf("=") : -1;
+    const flag = eq > 0 ? a.slice(0, eq) : a;
+    if (Object.hasOwn(BOOL_FLAGS, flag)) {
+      if (eq > 0) usageError(`option ${flag} does not take a value`);
+      out[BOOL_FLAGS[flag]] = true;
+      continue;
+    }
+    if (!Object.hasOwn(VALUE_FLAGS, flag)) {
+      const hint = out._[0] === "inspect" ? " (put the server command after `--`)" : "";
+      usageError(`unknown option ${q(flag)}${hint}`);
+    }
+    let v;
+    if (eq > 0) v = a.slice(eq + 1);
+    else {
+      v = argv[i + 1];
+      if (v === undefined || v.startsWith("--")) usageError(`option ${flag} requires a value`);
+      i++;
+    }
+    const key = VALUE_FLAGS[flag];
+    if (key === "target") out.target = splitList(v);
+    else if (key === "envKv") (out.envKv ||= []).push(v);
+    else out[key] = v;
   }
   return out;
 }
 
-function detectType(doc) {
-  if (Array.isArray(doc)) return "tools";
-  if (doc && (doc.mcpServers || doc.servers)) return "client-config";
-  if (doc && (doc.packages || doc.remotes || (typeof doc.$schema === "string" && /server.*schema/i.test(doc.$schema))))
-    return "server-json";
-  return "tools";
+function checkEnum(label, value, allowed) {
+  if (!allowed.includes(value)) usageError(`${label} must be ${allowed.join("|")} (got ${q(value)})`);
 }
 
 function parseEnvFile(p) {
   const env = {};
   if (!p || !existsSync(p)) return env;
-  for (const raw of readFileSync(p, "utf8").split(/\r?\n/)) {
+  for (const raw of readText(p).split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
@@ -78,7 +118,7 @@ function siblingPackageVersion(filePath) {
   }
   const py = join(dir, "pyproject.toml");
   if (existsSync(py)) {
-    const m = readFileSync(py, "utf8").match(/^\s*version\s*=\s*["']([^"']+)["']/m);
+    const m = readText(py).match(/^[ \t]*version\s*=\s*["']([^"']+)["']/m);
     if (m) return m[1];
   }
   return null;
@@ -113,6 +153,13 @@ OPTIONS
   -h, --help         show this help
   -v, --version      print version
 
+  Value options also accept --opt=value. Unknown options are an error.
+
+EXIT CODES
+  0  no error-tier findings
+  1  error-tier findings (including unparseable / unrecognized artifacts)
+  2  usage error (bad option, config, or target) or internal failure
+
 EXAMPLES
   mcpconform server.json .mcp.json
   mcpconform tools.json --target anthropic,openai
@@ -126,19 +173,37 @@ if (args.help || (!args._.length && !args.rest.length)) {
   console.log(HELP);
   process.exit(args.help ? 0 : 2);
 }
+checkEnum("--format", args.format, ["human", "sarif"]);
+if (args.type !== undefined) checkEnum("--type", args.type, ["tools", "server-json", "client-config"]);
 
 const ruleMeta = Object.fromEntries(loadJSON(join(ROOT, "rules.json")).rules.map((r) => [r.id, r]));
 
+// A config that is named but missing, unparseable, or of the wrong shape is a
+// usage error (exit 2): silently ignoring it would drop every override in it.
 let config = {};
 const cfgPath = args.config ? resolve(args.config) : join(process.cwd(), "mcpconform.config.json");
+if (args.config && !existsSync(cfgPath)) usageError(`config file not found: ${q(args.config)}`);
 if (existsSync(cfgPath)) {
   try {
     config = loadJSON(cfgPath);
-  } catch {
-    /* ignore bad config */
+  } catch (e) {
+    usageError(`cannot parse config ${q(cfgPath)}: ${escapeControl(e.message)}`);
   }
+  if (!isObj(config)) usageError(`config ${q(cfgPath)} must be a JSON object`);
 }
-const sevOverrides = config.rules || {};
+
+// Per-rule severity overrides. An invalid value ("ERROR", "high") used to
+// silently drop the rule from both the report and the exit code; reject it.
+const SEVERITIES = ["error", "warn", "info", "off"];
+const sevOverrides = config.rules ?? {};
+if (!isObj(sevOverrides)) usageError("config `rules` must be an object of rule id -> error|warn|info|off");
+for (const [id, v] of Object.entries(sevOverrides))
+  if (!SEVERITIES.includes(v)) usageError(`config rules[${q(id)}] must be ${SEVERITIES.join("|")} (got ${q(v)})`);
+
+let configTargets = config.targets ?? [];
+if (!Array.isArray(configTargets) || configTargets.some((t) => typeof t !== "string"))
+  usageError("config `targets` must be an array of profile ids");
+configTargets = configTargets.map((t) => t.trim()).filter(Boolean);
 
 // Every profile (shipped + config.profilesDir) is schema-validated at load; an
 // invalid one is a usage error (exit 2), never a silent skip.
@@ -156,15 +221,22 @@ try {
   process.exit(2);
 }
 
-let targetIds = args.target.length ? args.target : config.targets || [];
+let targetIds = args.target.length ? args.target : configTargets;
 // --portable: every verified profile, including the synthetic
 // strictest-common-denominator one; unverified stubs are excluded.
 if (args.portable || config.portable) targetIds = portableProfileIds(allProfiles);
-const missing = targetIds.filter((id) => !allProfiles[id]);
-const activeProfiles = targetIds.map((id) => allProfiles[id]).filter(Boolean);
+// Own-property lookups only: "constructor" / "toString" are not profiles. An
+// unknown or typo'd target is a usage error, not a warning line that SARIF
+// consumers never see.
+const missing = targetIds.filter((id) => !Object.hasOwn(allProfiles, id));
+if (missing.length)
+  usageError(`unknown target profile(s): ${missing.map(q).join(", ")} (known: ${Object.keys(allProfiles).sort().join(", ")})`);
+const activeProfiles = targetIds.map((id) => allProfiles[id]);
 
-const severityFor = (id) => sevOverrides[id] || ruleMeta[id]?.tier || "warn";
-const mode = args.mode || config.mode || "default";
+const severityFor = (id) =>
+  (Object.hasOwn(sevOverrides, id) && sevOverrides[id]) || (Object.hasOwn(ruleMeta, id) && ruleMeta[id].tier) || "warn";
+const mode = args.mode ?? config.mode ?? "default";
+checkEnum(args.mode !== undefined ? "--mode" : "config `mode`", mode, ["default", "strict"]);
 
 // Reporting floor: drop findings below the requested tier from the output.
 // This NEVER changes the exit code — error-tier findings are rank 0, so they
@@ -174,8 +246,9 @@ const mode = args.mode || config.mode || "default";
 // is "" and fails the enum check below, rather than silently no-opping.
 const TIER_RANK = { error: 0, warn: 1, info: 2 };
 const minSeverity = args.minSeverity !== undefined ? args.minSeverity : config.minSeverity ?? "info";
-if (!(minSeverity in TIER_RANK)) {
-  console.error(`mcpconform: --min-severity must be error|warn|info (got "${minSeverity}")`);
+if (typeof minSeverity !== "string" || !Object.hasOwn(TIER_RANK, minSeverity)) {
+  const label = args.minSeverity !== undefined ? "--min-severity" : "config `minSeverity`";
+  console.error(`mcpconform: ${label} must be error|warn|info (got ${q(minSeverity)})`);
   process.exit(2);
 }
 const atOrAboveFloor = (f) => TIER_RANK[f.tier] <= TIER_RANK[minSeverity];
@@ -244,12 +317,49 @@ function aggregate(findings, toolCounts) {
 // floor nor aggregation (both display-only) can ever change it.
 function emitReport(findings, meta, toolCounts = {}) {
   const shown = findings.filter(atOrAboveFloor);
-  const reported = expand ? shown : aggregate(shown, toolCounts);
-  const output = args.format === "sarif" ? renderSarif(reported, ruleMeta, meta) : renderHuman(reported, ruleMeta, meta);
+  const render = (list) => (args.format === "sarif" ? renderSarif(list, ruleMeta, meta) : renderHuman(list, ruleMeta, meta));
+  let output;
+  try {
+    output = render(expand ? shown : aggregate(shown, toolCounts));
+  } catch (e) {
+    // Never lose the whole report (and the SARIF file) to one unrenderable finding.
+    findings = [internalError(null, e, "rendering the report")];
+    output = render(findings);
+  }
   if (args.out) writeFileSync(resolve(args.out), output + "\n");
   else console.log(output);
+  // A crash while linting an artifact is reported as a meta/internal-error
+  // finding (so the other artifacts still get linted) but exits 2, not 1.
+  if (findings.some((f) => f.id === "meta/internal-error")) return 2;
   return shown.some((f) => f.tier === "error") ? 1 : 0;
 }
+
+// process.exit() right after console.log() drops whatever stdout has not yet
+// flushed when it is a pipe, truncating large reports (at 64KB on Linux). Exit
+// from the callback of a final write instead, which runs once stdout drains.
+function exitAfterFlush(code) {
+  process.exitCode = code;
+  process.stdout.write("", () => process.exit(code));
+}
+// The reader went away (`mcpconform ... | head`): not an internal error.
+process.stdout.on("error", (e) => (e.code === "EPIPE" ? process.exit(process.exitCode ?? 0) : crash(e)));
+
+const internalError = (file, e, while_ = "linting this artifact") => ({
+  id: "meta/internal-error", tier: "error", tool: null, profile: null, file,
+  message: `mcpconform crashed while ${while_}: ${show(e?.message ?? e).split("\n")[0].slice(0, 300)}`,
+});
+
+// Lint one tools array (static dump or live tools/list) against core + profiles.
+function lintTools(tools, emit, findings) {
+  runCoreRules(tools, emit);
+  runSchemaValidity(tools, emit);
+  if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
+  for (const p of activeProfiles)
+    if (p.verified === false && findings.some((f) => f.profile === p.id))
+      emit("meta/profile-unverified", null,
+        `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
+}
+const targetNote = () => (targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target");
 
 if (args._[0] === "inspect") {
   const cmd = args.rest.length ? args.rest : args._.slice(1);
@@ -257,16 +367,19 @@ if (args._[0] === "inspect") {
     console.error("usage: mcpconform inspect [--target a,b] -- <command> [args...]");
     process.exit(2);
   }
+  if (args.envFile && !existsSync(args.envFile)) usageError(`--env-file not found: ${q(args.envFile)}`);
   const env = { ...parseEnvFile(args.envFile) };
   for (const kv of args.envKv || []) {
     const eq = kv.indexOf("=");
-    if (eq > 0) env[kv.slice(0, eq)] = kv.slice(eq + 1);
+    if (eq <= 0) usageError(`--env expects KEY=VAL (got ${q(kv)})`);
+    env[kv.slice(0, eq)] = kv.slice(eq + 1);
   }
   let tools;
   try {
     tools = await inspectStdio(cmd[0], cmd.slice(1), { env });
   } catch (e) {
-    console.error(`mcpconform inspect: ${e.message}`);
+    // The message can carry server-supplied text (a JSON-RPC error.message).
+    console.error(`mcpconform inspect: ${escapeControl(e?.message ?? e)}`);
     console.error(
       "hint: if the server needs env vars to start, pass --env-file <.env> or --env KEY=VAL " +
         "(tool listing rarely hits the network, so placeholder values are usually enough), " +
@@ -282,31 +395,40 @@ if (args._[0] === "inspect") {
     );
     process.exit(2);
   }
-  const label = `inspect:${cmd.join(" ")}`;
-  const findings = [];
+  // Label the run by the command's basename only. The full command line often
+  // carries secrets (`--api-key=sk-live-...`) and would otherwise be echoed into
+  // the report and the SARIF artifact uri. Sanitized to a relative-path-ish uri.
+  let base = cmd[0].split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]/g, "_");
+  if (!base || /^\.+$/.test(base)) base = "server";
+  const label = `inspect/${base}`;
+  const nArgs = cmd.length - 1;
+  const argNote = nArgs ? ` (+${nArgs} arg${nArgs === 1 ? "" : "s"})` : "";
+  let findings = [];
   const emit = (id, tool, message, profile = null) => {
     const tier = severityFor(id);
     if (tier === "off") return;
-    findings.push({ id, tier, tool: tool ?? null, message, profile, file: label });
+    findings.push({ id, tier, tool: tool == null ? null : show(tool), message: show(message), profile, file: label });
   };
-  runCoreRules(tools, emit);
-  runSchemaValidity(tools, emit);
-  if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
-  for (const p of activeProfiles)
-    if (p.verified === false && findings.some((f) => f.profile === p.id))
-      emit("meta/profile-unverified", null,
-        `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
-  const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
-  const meta = { summaries: [`${label}  [tools]  (${tools.length} tools, ${tgt})`], targets: targetIds, missing, version: pkg.version };
-  process.exit(emitReport(findings, meta, { [label]: tools.length }));
+  try {
+    lintTools(tools, emit, findings);
+  } catch (e) {
+    findings = [internalError(label, e)];
+  }
+  const meta = { summaries: [`${label}${argNote}  [tools]  (${tools.length} tools, ${targetNote()})`], targets: targetIds, version: pkg.version };
+  exitAfterFlush(emitReport(findings, meta, { [label]: tools.length }));
 }
+
+const UNRECOGNIZED =
+  'Cannot determine the artifact type. Expected a tools/list result ({"tools": [...]}) or a bare array of Tool objects, ' +
+  "a server.json (packages / remotes / registry $schema), or a client config (mcpServers / servers). Pass --type to force one.";
+const typeName = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
 function lintOne(fileArg) {
   const findings = [];
   const emit = (id, tool, message, profile = null) => {
     const tier = severityFor(id);
     if (tier === "off") return;
-    findings.push({ id, tier, tool: tool ?? null, message, profile, file: fileArg });
+    findings.push({ id, tier, tool: tool == null ? null : show(tool), message: show(message), profile, file: fileArg });
   };
 
   const apath = resolve(fileArg);
@@ -318,40 +440,66 @@ function lintOne(fileArg) {
     return { findings, summary: `${fileArg}  [parse-error]` };
   }
 
+  // --type forces the artifact type; it still has to be the right JSON shape.
   const type = args.type || detectType(artifact);
   if (type === "tools") {
-    const tools = Array.isArray(artifact) ? artifact : artifact.tools || [];
-    runCoreRules(tools, emit);
-    runSchemaValidity(tools, emit);
-    if (activeProfiles.length) runProviderRules(tools, activeProfiles, emit, mode);
-    for (const p of activeProfiles)
-      if (p.verified === false && findings.some((f) => f.profile === p.id))
-        emit("meta/profile-unverified", null,
-          `Findings used profile "${p.id}" (verified:false) — confirm its numbers against the vendor docs.`, p.id);
-    const tgt = targetIds.length ? `targets: ${targetIds.join(", ")}` : "no provider target";
-    return { findings, summary: `${fileArg}  [tools]  (${tools.length} tools, ${tgt})`, toolCount: tools.length };
+    const tools = Array.isArray(artifact) ? artifact : isObj(artifact) ? artifact.tools : undefined;
+    if (!Array.isArray(tools)) {
+      const why = isObj(artifact) && Object.hasOwn(artifact, "tools")
+        ? `\`tools\` must be an array of Tool objects (got ${typeName(artifact.tools)}).`
+        : `Expected a tools/list result ({"tools": [...]}) or a bare array of Tool objects (got ${typeName(artifact)}).`;
+      emit("meta/unrecognized-artifact", null, why);
+      return { findings, summary: `${fileArg}  [tools]  (no tools array)` };
+    }
+    // Zero tools can be legitimate (a prompt/resource-only server), so this is a
+    // warning of its own, separate from the shape error above.
+    if (!tools.length) emit("meta/empty-artifact", null, "The tools artifact contains zero tools, so nothing was linted.");
+    lintTools(tools, emit, findings);
+    return { findings, summary: `${fileArg}  [tools]  (${tools.length} tools, ${targetNote()})`, toolCount: tools.length };
+  }
+  if ((type === "server-json" || type === "client-config") && !isObj(artifact)) {
+    emit("meta/unrecognized-artifact", null, `A ${type} artifact must be a JSON object (got ${typeName(artifact)}).`);
+    return { findings, summary: `${fileArg}  [${type === "server-json" ? "server.json" : type}]` };
   }
   if (type === "server-json") {
     runServerJsonRules(artifact, emit, { packageVersion: siblingPackageVersion(apath) });
-    return { findings, summary: `${fileArg}  [server.json]  (${(artifact.packages || []).length} package(s), ${(artifact.remotes || []).length} remote(s))` };
+    const count = (k) => (Array.isArray(artifact[k]) ? artifact[k].length : 0);
+    return { findings, summary: `${fileArg}  [server.json]  (${count("packages")} package(s), ${count("remotes")} remote(s))` };
   }
   if (type === "client-config") {
-    runClientConfigRules(artifact, emit);
-    const n = Object.keys(artifact.mcpServers || artifact.servers || {}).length;
+    const cc = vscodeMcpBlock(artifact) || artifact; // VS Code settings.json: lint its "mcp" block
+    runClientConfigRules(cc, emit);
+    const servers = cc.mcpServers || cc.servers;
+    const n = servers && typeof servers === "object" ? Object.keys(servers).length : 0;
+    if (servers && typeof servers === "object" && !n)
+      emit("meta/empty-artifact", null, "The client config declares zero servers, so nothing was linted.");
     return { findings, summary: `${fileArg}  [client-config]  (${n} server(s))` };
   }
+  const hint = unrecognizedHint(artifact);
+  emit("meta/unrecognized-artifact", null, hint ? `${hint} ${UNRECOGNIZED}` : UNRECOGNIZED);
   return { findings, summary: `${fileArg}  [unknown]` };
 }
 
-const allFindings = [];
-const summaries = [];
-const toolCounts = {};
-for (const fileArg of args._) {
-  const { findings, summary, toolCount } = lintOne(fileArg);
-  allFindings.push(...findings);
-  summaries.push(summary);
-  if (toolCount != null) toolCounts[fileArg] = toolCount;
+function lintFiles() {
+  // Files after `--` are files too (`--` only ends option parsing).
+  const files = [...args._, ...args.rest];
+  const allFindings = [];
+  const summaries = [];
+  const toolCounts = Object.create(null);
+  for (const fileArg of files) {
+    // One bad artifact must not abort the rest: a crash becomes a finding.
+    let res;
+    try {
+      res = lintOne(fileArg);
+    } catch (e) {
+      res = { findings: [internalError(fileArg, e)], summary: `${fileArg}  [internal-error]` };
+    }
+    for (const f of res.findings) allFindings.push(f); // no spread: 100k+ findings overflow it
+    summaries.push(res.summary);
+    if (res.toolCount != null) toolCounts[fileArg] = res.toolCount;
+  }
+  const meta = { summaries, targets: targetIds, version: pkg.version };
+  return emitReport(allFindings, meta, toolCounts);
 }
 
-const meta = { summaries, targets: targetIds, missing, version: pkg.version };
-process.exit(emitReport(allFindings, meta, toolCounts));
+if (args._[0] !== "inspect") exitAfterFlush(lintFiles());

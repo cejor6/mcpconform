@@ -49,12 +49,16 @@ export function inspectStdio(command, args = [], { timeoutMs = 20000, env } = {}
     };
 
     child.on("error", (e) => finish(e));
+    // A server that exits (or closes stdin) before we write would otherwise raise
+    // an unhandled EPIPE on the stdin stream and crash the CLI.
+    child.stdin.on("error", (e) => finish(new Error(`cannot write to the server's stdin (${e.code || e.message})`)));
     child.stderr.on("data", () => {}); // server logs belong on stderr; ignore
     child.on("exit", (code) => {
       if (!done) finish(new Error(`server exited (code ${code}) before tools/list completed`));
     });
 
     function handle(msg) {
+      if (done || !msg || typeof msg !== "object") return; // `null`, numbers, strings: not JSON-RPC
       if (msg.id === initId && (msg.result || msg.error)) {
         if (msg.error) return finish(new Error(`initialize failed: ${msg.error.message}`));
         send({ jsonrpc: "2.0", method: "notifications/initialized" });
@@ -64,7 +68,7 @@ export function inspectStdio(command, args = [], { timeoutMs = 20000, env } = {}
       if (msg.id === listId && (msg.result || msg.error)) {
         if (msg.error) return finish(new Error(`tools/list failed: ${msg.error.message}`));
         const r = msg.result || {};
-        if (Array.isArray(r.tools)) tools.push(...r.tools);
+        if (Array.isArray(r.tools)) for (const t of r.tools) tools.push(t); // no spread: huge arrays overflow it
         if (r.nextCursor) {
           listId = request("tools/list", { cursor: r.nextCursor });
           return;
@@ -86,7 +90,11 @@ export function inspectStdio(command, args = [], { timeoutMs = 20000, env } = {}
         } catch {
           continue; // skip non-JSON-RPC lines
         }
-        handle(msg);
+        try {
+          handle(msg);
+        } catch (e) {
+          return finish(e); // never let a malformed message crash the CLI from an event handler
+        }
       }
     });
 

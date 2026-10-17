@@ -11,9 +11,27 @@ const SECRET = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
   /\bAKIA[0-9A-Z]{16}\b/,
   /\bAIza[0-9A-Za-z_-]{20,}/,
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT
 ];
-const looksSecret = (v) => typeof v === "string" && SECRET.some((re) => re.test(v));
+// JWT: equivalent to /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
+// which is quadratic on "eyJ-eyJ-eyJ-..." (each "-eyJ" restarts a scan to the end
+// of the run). Every start inside one [A-Za-z0-9_-] run shares the same run end
+// and has a shorter header, so if the run's first candidate fails, the rest do
+// too: test it once, then skip to the end of the run. Linear.
+function hasJwt(v) {
+  const start = /\beyJ/g;
+  const jwt = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/y;
+  const run = /[A-Za-z0-9_-]*/y;
+  let m;
+  while ((m = start.exec(v))) {
+    jwt.lastIndex = m.index;
+    if (jwt.test(v)) return true;
+    run.lastIndex = m.index;
+    run.test(v);
+    start.lastIndex = Math.max(run.lastIndex, m.index + 1);
+  }
+  return false;
+}
+const looksSecret = (v) => typeof v === "string" && (SECRET.some((re) => re.test(v)) || hasJwt(v));
 
 // Union of server-entry keys recognized across the major clients (Claude
 // Desktop, Claude Code .mcp.json, VS Code, Cursor, Cline/Roo). Keys outside
@@ -31,8 +49,19 @@ const KNOWN_SERVER_KEYS = new Set([
 // `${`, an empty `${}`, or an invalid variable name. Well-formed `${NAME}` and
 // `${NAME:-default}` are left alone (they may resolve from the host env, which
 // we can't see statically).
+//
+// Linear time: VAR_REF alone is quadratic on "${a:-${a:-..." with no closing
+// brace (every `${` rescans to the end). If the LAST `${` has no `}` after it,
+// it is unterminated, hence malformed — answer that up front. Otherwise every
+// `${` has a `}` ahead of it and each match attempt stops at the next `}`.
 const VAR_REF = /\$\{[A-Za-z_][A-Za-z0-9_]*(?::[-+?][^}]*)?\}/g;
-const hasMalformedRef = (v) => typeof v === "string" && v.replace(VAR_REF, "").includes("${");
+const hasMalformedRef = (v) => {
+  if (typeof v !== "string") return false;
+  const last = v.lastIndexOf("${");
+  if (last < 0) return false;
+  if (!v.includes("}", last + 2)) return true;
+  return v.replace(VAR_REF, "").includes("${");
+};
 
 export function runClientConfigRules(doc, emit) {
   const servers = (doc && (doc.mcpServers || doc.servers)) || null;
