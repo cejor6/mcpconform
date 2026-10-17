@@ -13,10 +13,12 @@ All notable changes to mcpconform are documented here. The format follows
 - Workflows and `action.yml` pin third-party actions to full commit SHAs.
 
 ### Added
-- `meta/unrecognized-artifact`: an artifact of unknown shape, one that doesn't
-  match the forced `--type`, or a tools dump with zero tools (these passed clean).
-- `meta/internal-error`: a crash while linting one artifact is reported, the
-  rest are still linted, and the run exits 2.
+- `meta/internal-error`: a crash while linting one artifact (or rendering the
+  report) is reported, the rest are still linted, and the run exits 2.
+- `meta/empty-artifact` (warn): a tools dump with zero tools or a client config
+  with zero servers. A warning, since prompt/resource-only servers are legitimate.
+- VS Code `settings.json` is detected as a client config and linted through its
+  `"mcp": {"servers": …}` block.
 - GitHub Action inputs `min-severity`, `config`, and `fail-on-error`
   (`fail-on-error: false` only passes when the SARIF report was written).
 - Profiles (shipped and from `profilesDir`) are validated against `profile.schema.json` on load; an invalid one exits 2 naming the file, and a `profilesDir` profile overriding a shipped id warns.
@@ -38,14 +40,28 @@ Users on the floating `@v1` tag pick these up automatically:
 - `mode` now defaults to empty, so a config file's `mode` is honored instead
   of being overridden with `default`.
 
-### Changed
+### Breaking (CLI)
 - **Exit codes are now 0 / 1 / 2.** `1` means error-tier findings only; `2` is a
   usage error or an internal failure (a crash used to exit `1`).
-- **Usage mistakes exit 2 instead of being ignored:** unknown options, invalid
-  `--format` / `--mode` / `--type` values, unknown `--target` profiles (the known
-  ones are listed), a missing `--config`, unparseable config, and config `rules`
-  severities outside `error|warn|info|off`. Value options accept `--opt=value`;
-  target lists are trimmed (`"anthropic, openai"`).
+- **Unrecognized artifacts now fail (exit 1)** with `meta/unrecognized-artifact`:
+  an unknown shape (a typo'd `mcpServer`, a server.json with no
+  `packages`/`remotes`/`$schema`, `null`) or one that doesn't match a forced
+  `--type`. These used to pass clean as "0 tools". The message names a likely fix.
+- **An unknown `--target` / config `targets` profile exits 2** (listing the known
+  ones); it used to be a warning line that SARIF never carried.
+- **Unknown options and invalid option values exit 2** instead of being ignored
+  (`--format`, `--mode`, `--type`, `--min-severity`). Single-dash arguments are now
+  options too, so `mcpconform inspect npx -y foo` needs `--`:
+  `mcpconform inspect -- npx -y foo`.
+- **Bad config exits 2:** a missing `--config`, unparseable JSON, `rules`
+  severities outside `error|warn|info|off` (e.g. `"ERROR"`), non-array `targets`,
+  or an invalid `mode` / `minSeverity`. These were silently ignored.
+- **Zero tools / zero servers** is now a `meta/empty-artifact` warning (exit code
+  unchanged unless you raise it to `error` in config).
+
+### Changed
+- Value options accept `--opt=value`; target lists are trimmed
+  (`"anthropic, openai"`).
 - `inspect` labels the run by the command's basename (`inspect/node (+1 arg)`)
   instead of echoing the full command line, which can carry secrets.
 - SARIF runs carry `properties.targets` and `properties.summaries`.
@@ -54,7 +70,8 @@ Users on the floating `@v1` tag pick these up automatically:
 
 ### Fixed
 - Crashes on malformed input (`null`, `{"tools":"x"}`, `{"packages":[null]}`,
-  deeply nested schemas, an `inspect` server that emits `null` or closes stdin).
+  object-valued names/versions such as `{"toString": 1}`, deeply nested schemas,
+  an `inspect` server that emits `null` or closes stdin).
 - Quadratic regexes on `$schema`, `${...}` refs, JWT detection, and identifier
   word-splitting for secret names / mutating verbs (300KB took 20–150s).
 - Control characters from the input are escaped in the human report and SARIF.
