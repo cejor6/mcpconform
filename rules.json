@@ -519,6 +519,22 @@
       "message": "The artifact could not be parsed as JSON."
     },
     {
+      "id": "meta/unrecognized-artifact",
+      "tier": "error",
+      "appliesTo": "meta",
+      "source": "engine",
+      "message": "The artifact's type could not be determined, its shape does not match the forced --type, or it contains zero tools — so nothing (or nothing useful) was linted.",
+      "bad": "{\"mcpServer\": {...}}  (typo for mcpServers)  /  {\"tools\": []}",
+      "good": "{\"mcpServers\": {...}}  /  {\"tools\": [{...}]}"
+    },
+    {
+      "id": "meta/internal-error",
+      "tier": "error",
+      "appliesTo": "meta",
+      "source": "engine",
+      "message": "mcpconform crashed while linting this artifact; the other artifacts were still linted. The run exits 2. Please report it."
+    },
+    {
       "id": "meta/profile-invalid",
       "tier": "error",
       "appliesTo": "meta",

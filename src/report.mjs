@@ -18,7 +18,6 @@ export function renderHuman(findings, ruleMeta, meta) {
   const esc = escapeControl;
   const lines = [];
   for (const s of meta.summaries || []) lines.push(`mcpconform  ${esc(s)}`);
-  if (meta.missing?.length) lines.push(`  ! unknown target profile(s) ignored: ${meta.missing.map(esc).join(", ")}`);
   lines.push("");
 
   if (!findings.length) {

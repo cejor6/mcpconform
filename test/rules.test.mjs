@@ -545,6 +545,166 @@ function rfile(content, raw = false) {
 }
 const noStack = (r) => assert.doesNotMatch(r.out, /\n\s+at .*\(node:|Unhandled|Node\.js v\d/, "no raw Node crash output");
 
+// --- exit codes + argument parsing ---
+test("cli: unknown flag exits 2 instead of being silently ignored", () => {
+  const r = rrun(["examples/tools.good.json", "--bogus"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /unknown option "--bogus"/);
+});
+
+test("cli: --flag=value works for value flags (was a silent 'No findings')", () => {
+  const r = rrun(["examples/tools.bad.json", "--target=anthropic"]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /provider\/name-pattern/);
+  const s = rrun(["examples/tools.bad.json", "--target=anthropic", "--format=sarif", "--min-severity=error"]);
+  assert.ok(JSON.parse(s.stdout).runs[0].results.every((x) => x.level === "error"));
+});
+
+test("cli: bad enum values for --format/--mode/--type exit 2 with a message", () => {
+  for (const [flag, val] of [["--format", "xml"], ["--mode", "loud"], ["--type", "yaml"]]) {
+    const r = rrun(["examples/tools.good.json", flag, val]);
+    assert.equal(r.code, 2, `${flag} ${val}`);
+    assert.match(r.out, new RegExp(`${flag} must be`));
+  }
+});
+
+test("cli: a value flag with no value (or followed by another flag) exits 2", () => {
+  assert.equal(rrun(["examples/tools.good.json", "--format"]).code, 2);
+  const r = rrun(["examples/tools.good.json", "--target", "--format", "sarif"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /--target requires a value/);
+});
+
+test("cli: a boolean flag given a value exits 2", () => {
+  assert.equal(rrun(["examples/tools.good.json", "--expand=yes"]).code, 2);
+});
+
+test("cli: files after `--` are linted, not dropped", () => {
+  const r = rrun(["--target", "anthropic", "--", "examples/tools.bad.json"]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /provider\/name-pattern/);
+});
+
+test("cli inspect: a server flag without `--` is a usage error with a hint", () => {
+  const r = rrun(["inspect", process.execPath, mock, "--port", "3"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /after `--`/);
+});
+
+test("cli: an I/O failure (unwritable --out) exits 2, not 1", () => {
+  const r = rrun(["examples/tools.good.json", "--out", join(RTMP, "no/such/dir/out.txt")]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /internal error/);
+});
+
+// --- targets ---
+test("cli: an unknown target exits 2 and lists the known profiles", () => {
+  const r = rrun(["examples/tools.good.json", "--target", "anthropc"]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /unknown target profile\(s\): "anthropc"/);
+  assert.match(r.out, /known: .*anthropic/);
+});
+
+test("cli: target list entries are trimmed ('anthropic, openai' keeps openai)", () => {
+  const r = rrun(["examples/tools.good.json", "--target", "anthropic, openai"]);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /targets: anthropic, openai\)/);
+});
+
+test("cli: prototype keys are not profiles or severities", () => {
+  assert.equal(rrun(["examples/tools.bad.json", "--target", "constructor"]).code, 2);
+  const r = rrun(["examples/tools.bad.json", "--min-severity", "constructor"]);
+  assert.equal(r.code, 2); // used to hide every finding and exit 0
+  assert.match(r.out, /min-severity/);
+});
+
+// --- config validation ---
+test("cli: config severity overrides must be error|warn|info|off", () => {
+  for (const v of ["ERROR", "high"]) {
+    const cfg = rfile({ rules: { "tool/name-unique": v } });
+    const r = rrun(["examples/tools.bad.json", "--config", cfg]);
+    assert.equal(r.code, 2, v);
+    assert.match(r.out, /tool\/name-unique.*must be error\|warn\|info\|off/);
+  }
+});
+
+test("cli: a missing or malformed --config exits 2", () => {
+  assert.equal(rrun(["examples/tools.good.json", "--config", join(RTMP, "nope.json")]).code, 2);
+  assert.equal(rrun(["examples/tools.good.json", "--config", rfile("{bad", true)]).code, 2);
+  assert.equal(rrun(["examples/tools.good.json", "--config", rfile({ targets: "anthropic" })]).code, 2);
+});
+
+test("cli: config.mode is honored (was always overridden by the flag default)", () => {
+  const cfg = rfile({ targets: ["openai"], mode: "strict" });
+  const r = rrun(["examples/tools.bad.json", "--config", cfg]);
+  assert.match(r.out, /provider\/schema-additional-properties|provider\/schema-all-required/);
+});
+
+// --- artifact type detection ---
+test("cli: an unrecognized shape is a meta error, not a clean 0-tool lint", () => {
+  for (const doc of [{ mcpServer: { a: { command: "x" } } }, { name: "io.github.a/b", version: "1.0.0" }, null, 42]) {
+    const r = rrun([rfile(doc)]);
+    assert.equal(r.code, 1, JSON.stringify(doc));
+    assert.match(r.out, /meta\/unrecognized-artifact/);
+    assert.match(r.out, /--type/);
+  }
+});
+
+test("cli: a tools artifact with zero tools is flagged", () => {
+  for (const doc of [{ tools: [] }, []]) {
+    const r = rrun([rfile(doc)]);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /meta\/unrecognized-artifact[\s\S]*zero tools/);
+  }
+});
+
+test("cli: --type still requires the matching JSON shape", () => {
+  let r = rrun([rfile(null), "--type", "server-json"]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /server-json artifact must be a JSON object/);
+  r = rrun([rfile({ mcpServer: {} }), "--type", "tools"]);
+  assert.match(r.out, /meta\/unrecognized-artifact/);
+  r = rrun([rfile({ servers: { a: { command: "x" } } }), "--type", "client-config"]);
+  assert.equal(r.code, 0);
+});
+
+test("cli: the unrecognized-artifact rule can be turned off in config", () => {
+  const cfg = rfile({ rules: { "meta/unrecognized-artifact": "off" } });
+  assert.equal(rrun([rfile({ tools: [] }), "--config", cfg]).code, 0);
+});
+
+// --- malformed input: findings, never crashes ---
+test("cli: malformed shapes produce findings and the remaining files are still linted", () => {
+  const bad = [null, { tools: "x" }, { tools: {} }, { packages: [null] }, { remotes: [null] }, { mcpServers: "abc" }].map((d) => rfile(d));
+  const r = rrun([...bad, "examples/tools.bad.json", "--target", "anthropic"]);
+  noStack(r);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /`tools` must be an array of Tool objects \(got string\)/);
+  assert.match(r.out, /`tools` must be an array of Tool objects \(got object\)/);
+  assert.match(r.out, /packages\[0\] must be an object/);
+  assert.match(r.out, /remotes\[0\] must be an object/);
+  assert.match(r.out, /provider\/name-pattern/); // the good file after them still ran
+});
+
+test("cli: a crash inside one artifact becomes meta/internal-error, exits 2, and the rest still run", () => {
+  // Preload a hook that throws for one specific tool name, simulating an engine bug.
+  const hook =
+    "data:text/javascript,const a=Set.prototype.add;" +
+    "Set.prototype.add=function(v){if(v==='__crash__')throw new Error('boom');return a.call(this,v)}";
+  const crashing = rfile({ tools: [{ name: "__crash__", description: "d", inputSchema: { type: "object" } }] });
+  const r = rrun([crashing, "examples/tools.bad.json", "--target", "anthropic"], ["--import", hook]);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /meta\/internal-error/);
+  assert.match(r.out, /boom/);
+  assert.match(r.out, /provider\/name-pattern/);
+});
+
+test("cli: a UTF-8 BOM is stripped before parsing", () => {
+  const r = rrun([rfile("﻿" + JSON.stringify({ tools: [{ name: "ok_tool", description: "d", inputSchema: { type: "object", additionalProperties: false } }] }), true)]);
+  assert.doesNotMatch(r.out, /parse-error/);
+  assert.equal(r.code, 0);
+});
+
 test("core: required names that are Object.prototype keys are still checked", () => {
   const f = [];
   runCoreRules([{ name: "x", description: "d", inputSchema: { type: "object", properties: {}, required: ["constructor", "toString"] } }],
@@ -574,12 +734,57 @@ test("schema: a 3000-deep inputSchema is walked without a stack overflow", () =>
   assert.ok(f.some((m) => /nests 3000 deep/.test(m)));
 });
 
+test("cli: a deeply nested schema file is linted, not crashed", () => {
+  const depth = 3000;
+  const schema = '{"type":"object","properties":{"a":'.repeat(depth) + '{"type":"string"}' + "}}".repeat(depth);
+  const f = join(RTMP, "deep.json");
+  writeFileSync(f, `{"tools":[{"name":"deep","description":"d","inputSchema":${schema}}]}`);
+  const r = rrun([f, "--target", "openai", "--mode", "strict"]);
+  noStack(r);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /provider\/schema-max-depth/);
+});
+
+// --- inspect robustness ---
+test("cli inspect: a server that writes `null`/non-objects is handled (exit 2, no crash)", () => {
+  const srv = join(RTMP, "nullsrv.mjs");
+  writeFileSync(srv, `
+let buf = "";
+process.stdin.on("data", (c) => {
+  buf += c;
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const m = JSON.parse(buf.slice(0, nl)); buf = buf.slice(nl + 1);
+    process.stdout.write('null\\n5\\n"x"\\n');
+    if (m.method === "initialize") process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: {} }) + "\\n");
+    if (m.method === "tools/list") process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { message: "nope\\u001b[2J" } }) + "\\n");
+  }
+});`);
+  const r = rrun(["inspect", "--", process.execPath, srv]);
+  noStack(r);
+  assert.equal(r.code, 2);
+  assert.match(r.out, /tools\/list failed: nope\\u001b\[2J/); // server text is escaped too
+  assert.doesNotMatch(r.out, /\x1b/);
+});
+
 test("cli inspect: a server that closes its stdin fails cleanly (no unhandled EPIPE)", () => {
   // Closes stdin, then answers initialize: our follow-up writes hit a closed pipe.
   const srv = 'require("fs").closeSync(0);console.log(JSON.stringify({jsonrpc:"2.0",id:1,result:{}}));setTimeout(()=>{},5000)';
   const r = rrun(["inspect", "--", process.execPath, "-e", srv]);
   noStack(r);
   assert.equal(r.code, 2);
+});
+
+test("cli inspect: the report never echoes the spawned command's arguments", () => {
+  const secret = "sk-live-0123456789abcdefSECRET";
+  const human = rrun(["inspect", "--", process.execPath, mock, `--api-key=${secret}`]);
+  assert.equal(human.code, 0);
+  assert.doesNotMatch(human.out, /SECRET/);
+  assert.match(human.out, /inspect\/node(\.exe)? \(\+2 args\)/);
+  const sarif = rrun(["inspect", "--format", "sarif", "--", process.execPath, mock, `--api-key=${secret}`]);
+  assert.doesNotMatch(sarif.out, /SECRET/);
+  const uris = JSON.parse(sarif.stdout).runs[0].results.map((x) => x.locations[0].physicalLocation.artifactLocation.uri);
+  assert.ok(uris.length && uris.every((u) => /^inspect\/[A-Za-z0-9._-]+$/.test(u)), uris.join(","));
 });
 
 // --- ReDoS: 300KB adversarial inputs stay linear ---
@@ -600,6 +805,15 @@ test("redos: JWT secret check is linear on 300KB of '-eyJ' runs", () => {
   fast(() => runClientConfigRules({ mcpServers: { a: { command: "x", env: { K: "eyJ-".repeat(75000) } } } }, () => {}), 1000);
 });
 
+test("redos: a 300KB server-ish $schema is detected in linear time", () => {
+  const f = rfile({ $schema: "server".repeat(50000) });
+  // includes process start-up; the quadratic regex took ~20s here
+  fast(() => assert.match(rrun([f]).out, /meta\/unrecognized-artifact/), 5000);
+  const ok = rrun([rfile({ $schema: "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json" })]);
+  assert.match(ok.out, /\[server\.json\]/);
+});
+
+// The rewrites must not change what is flagged.
 test("client-config: ${...} and JWT detection semantics are unchanged", () => {
   const flagged = (v, where = "args") => {
     const f = [];
@@ -648,4 +862,11 @@ test("cli: SARIF run properties carry the targets and per-artifact summaries", (
   assert.deepEqual(props.targets, ["anthropic"]);
   assert.equal(props.summaries.length, 2);
   assert.match(props.summaries[1], /\[server\.json\]/);
+});
+
+test("cli: a report larger than the 64KB pipe buffer is not truncated", () => {
+  const tools = Array.from({ length: 400 }, (_, i) => ({ name: `t_${i}` })); // 2 findings each, no ajv work
+  const r = rrun([rfile({ tools }), "--format", "sarif"]);
+  assert.ok(r.stdout.length > 65536, `only ${r.stdout.length} bytes`);
+  assert.equal(JSON.parse(r.stdout).runs[0].results.length, 800);
 });

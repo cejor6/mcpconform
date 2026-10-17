@@ -4,6 +4,36 @@ All notable changes to mcpconform are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Exit codes are now 0 / 1 / 2.** `1` means error-tier findings only; `2` is a
+  usage error or an internal failure (a crash used to exit `1`).
+- **Usage mistakes exit 2 instead of being ignored:** unknown options, invalid
+  `--format` / `--mode` / `--type` values, unknown `--target` profiles (the known
+  ones are listed), a missing `--config`, unparseable config, and config `rules`
+  severities outside `error|warn|info|off`. Value options accept `--opt=value`;
+  target lists are trimmed (`"anthropic, openai"`).
+- `inspect` labels the run by the command's basename (`inspect/node (+1 arg)`)
+  instead of echoing the full command line, which can carry secrets.
+- SARIF runs carry `properties.targets` and `properties.summaries`.
+
+### Added
+- `meta/unrecognized-artifact`: an artifact of unknown shape, one that doesn't
+  match the forced `--type`, or a tools dump with zero tools (these passed clean).
+- `meta/internal-error`: a crash while linting one artifact is reported, the
+  rest are still linted, and the run exits 2.
+- `meta/profile-invalid`: e.g. a profile `toolName.pattern` that isn't a valid regex.
+
+### Fixed
+- Crashes on malformed input (`null`, `{"tools":"x"}`, `{"packages":[null]}`,
+  deeply nested schemas, an `inspect` server that emits `null` or closes stdin).
+- Quadratic regexes on `$schema`, `${...}` refs, and JWT detection (300KB took 20–60s).
+- Control characters from the input are escaped in the human report and SARIF.
+- `Object.prototype` names (`constructor`) in `required`, `--target`, `--min-severity`.
+- A UTF-8 BOM no longer fails parsing; config `mode` is no longer ignored;
+  reports over 64KB are no longer truncated when piped.
+
 ## [0.2.1] - 2026-07-12
 
 Docs / packaging release — no behavior change; republished so the refreshed

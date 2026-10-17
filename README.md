@@ -77,7 +77,20 @@ mcpconform server.json .mcp.json tools.json --target anthropic,openai
 - `--mode strict` — also apply each provider's strict-mode constraints.
 - `--format sarif --out file.sarif` — emit SARIF for GitHub code scanning.
 - `--min-severity error|warn|info` — report only findings at or above this tier. This is a **display filter**, not a fail-gate: the exit code is unaffected — only `error`-tier findings ever fail a run. Also settable as `minSeverity` in config. Handy in CI to drop info-tier noise without per-rule `off` suppressions.
+- `--type tools|server-json|client-config` — force the artifact type. An artifact whose shape matches no known type — or a tools dump with zero tools — is reported as a `meta/unrecognized-artifact` error instead of passing clean.
 - `--expand` — a few info rules flag framework-injected noise that repeats identically on every tool (e.g. FastMCP stamping a non-reverse-DNS `_meta` key on all of them). By default, when such a finding hits 3+ tools it collapses to a single line with a count — in the human report **and** in SARIF (one alert instead of N identical ones). `--expand` (or `expand` in config) lists every occurrence. Collapsing is display-only (never changes the exit code) and opt-in per rule (`aggregate: true` in `rules.json`): `warn`/`error` and per-tool-actionable info findings always stay itemized with their tool names.
+
+Every value option also accepts the `--opt=value` form. Unknown options, invalid values (`--format xml`), unknown `--target` profiles (`--target anthropc` lists the known ones), and invalid config (bad JSON, `"rules"` severities outside `error|warn|info|off`) are usage errors (exit `2`).
+
+### Exit codes
+
+| code | meaning |
+|------|---------|
+| `0` | no `error`-tier findings |
+| `1` | `error`-tier findings — including artifacts that can't be parsed (`meta/parse-error`) or recognized (`meta/unrecognized-artifact`) |
+| `2` | usage error (bad option, config, or target), `inspect` couldn't start the server / `--min-tools` not met, or an internal failure. A crash while linting one artifact is reported as `meta/internal-error`; the other artifacts are still linted, and the run exits `2` |
+
+In CI, treat `1` as "the linter found problems" and `2` as "the linter could not do its job".
 
 ### Lint a live server (any language)
 
