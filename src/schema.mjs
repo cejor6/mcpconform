@@ -42,23 +42,30 @@ export function runSchemaValidity(tools, emit) {
   }
 }
 
-// Collect every subschema with its object-nesting depth (root = 0).
-function collect(schema, depth, acc) {
-  if (!schema || typeof schema !== "object") return acc;
-  acc.push({ schema, depth });
-  const into = (s, d) => collect(s, d, acc);
-  if (schema.properties && typeof schema.properties === "object")
-    for (const k of Object.keys(schema.properties)) into(schema.properties[k], depth + 1);
-  if (Array.isArray(schema.items)) schema.items.forEach((s) => into(s, depth + 1));
-  else if (schema.items) into(schema.items, depth + 1);
-  if (Array.isArray(schema.prefixItems)) schema.prefixItems.forEach((s) => into(s, depth + 1));
-  if (schema.additionalProperties && typeof schema.additionalProperties === "object")
-    into(schema.additionalProperties, depth + 1);
-  for (const c of ["anyOf", "oneOf", "allOf"])
-    if (Array.isArray(schema[c])) schema[c].forEach((s) => into(s, depth)); // combinators: same nesting level
-  for (const d of ["$defs", "definitions"])
-    if (schema[d] && typeof schema[d] === "object")
-      for (const k of Object.keys(schema[d])) into(schema[d][k], depth + 1);
+// Collect every subschema with its object-nesting depth (root = 0), in pre-order.
+// Iterative (explicit stack), so a deeply nested schema cannot overflow the call stack.
+function collect(root, rootDepth, acc) {
+  const stack = [[root, rootDepth]];
+  while (stack.length) {
+    const [schema, depth] = stack.pop();
+    if (!schema || typeof schema !== "object") continue;
+    acc.push({ schema, depth });
+    const kids = [];
+    const into = (s, d) => kids.push([s, d]);
+    if (schema.properties && typeof schema.properties === "object")
+      for (const k of Object.keys(schema.properties)) into(schema.properties[k], depth + 1);
+    if (Array.isArray(schema.items)) schema.items.forEach((s) => into(s, depth + 1));
+    else if (schema.items) into(schema.items, depth + 1);
+    if (Array.isArray(schema.prefixItems)) schema.prefixItems.forEach((s) => into(s, depth + 1));
+    if (schema.additionalProperties && typeof schema.additionalProperties === "object")
+      into(schema.additionalProperties, depth + 1);
+    for (const c of ["anyOf", "oneOf", "allOf"])
+      if (Array.isArray(schema[c])) schema[c].forEach((s) => into(s, depth)); // combinators: same nesting level
+    for (const d of ["$defs", "definitions"])
+      if (schema[d] && typeof schema[d] === "object")
+        for (const k of Object.keys(schema[d])) into(schema[d][k], depth + 1);
+    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]); // reversed: pop in original order
+  }
   return acc;
 }
 

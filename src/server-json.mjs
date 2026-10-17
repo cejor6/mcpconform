@@ -28,6 +28,10 @@ export function runServerJsonRules(doc, emit, opts = {}) {
 
   pkgs.forEach((p, i) => {
     const at = `packages[${i}]`;
+    if (!p || typeof p !== "object" || Array.isArray(p)) {
+      emit("server-json/packages-or-remotes", at, `${at} must be an object.`);
+      return;
+    }
     if (!REGISTRY_TYPES.includes(p.registryType))
       emit("server-json/registry-type-enum", at,
         `registryType "${p.registryType}" must be one of ${REGISTRY_TYPES.join("|")}.`);
@@ -63,6 +67,10 @@ export function runServerJsonRules(doc, emit, opts = {}) {
 
   remotes.forEach((r, i) => {
     const at = `remotes[${i}]`;
+    if (!r || typeof r !== "object" || Array.isArray(r)) {
+      emit("server-json/packages-or-remotes", at, `${at} must be an object.`);
+      return;
+    }
     if (!REMOTE_TYPES.includes(r.type))
       emit("server-json/transport-type-enum", at, `remote type "${r.type}" must be one of ${REMOTE_TYPES.join("|")}.`);
     if (!r.url) emit("server-json/transport-url", at, "remote url is required.");

@@ -522,3 +522,62 @@ test("cli: SARIF driver.version tracks package.json (no drift)", () => {
   const sarif = JSON.parse(cli(["examples/tools.good.json", "--format", "sarif"]).out);
   assert.equal(sarif.runs[0].tool.driver.version, pkgVersion);
 });
+
+// ===== CLI robustness: exit codes, argument parsing, malformed input, ReDoS,
+// output escaping. Kept in this file on purpose: with --test-force-exit,
+// `node --test` over several files can drop the tail of one file's tests when
+// another file finishes first.
+import { mkdtempSync } from "node:fs";
+const RTMP = mkdtempSync(join(tmpdir(), "mcpconform-robust-"));
+function rrun(a, nodeArgs = []) {
+  const r = spawnSync(process.execPath, [...nodeArgs, join(ROOT, "src/index.mjs"), ...a], {
+    encoding: "utf8",
+    cwd: ROOT,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return { code: r.status, stdout: r.stdout || "", stderr: r.stderr || "", out: (r.stdout || "") + (r.stderr || "") };
+}
+let rseq = 0;
+function rfile(content, raw = false) {
+  const f = join(RTMP, `a${rseq++}.json`);
+  writeFileSync(f, raw ? content : JSON.stringify(content));
+  return f;
+}
+const noStack = (r) => assert.doesNotMatch(r.out, /\n\s+at .*\(node:|Unhandled|Node\.js v\d/, "no raw Node crash output");
+
+test("core: required names that are Object.prototype keys are still checked", () => {
+  const f = [];
+  runCoreRules([{ name: "x", description: "d", inputSchema: { type: "object", properties: {}, required: ["constructor", "toString"] } }],
+    (id, tool, message) => f.push({ id, message }));
+  assert.equal(f.filter((x) => x.id === "tool/required-references-properties").length, 2);
+});
+
+test("core: a non-array tools value is ignored, not a crash", () => {
+  assert.doesNotThrow(() => runCoreRules("x", () => {}));
+  assert.doesNotThrow(() => runCoreRules({}, () => {}));
+});
+
+test("provider: an invalid toolName.pattern is reported as meta/profile-invalid", () => {
+  const f = [];
+  const prof = { id: "custom", toolName: { pattern: "(", maxLength: 3 } };
+  runProviderRules([{ name: "longname", description: "d", inputSchema: { type: "object" } }], [prof], (id) => f.push(id));
+  assert.ok(f.includes("meta/profile-invalid"));
+  assert.ok(f.includes("provider/name-length")); // the profile's other checks still run
+});
+
+test("schema: a 3000-deep inputSchema is walked without a stack overflow", () => {
+  let s = { type: "string" };
+  for (let i = 0; i < 3000; i++) s = { type: "object", properties: { a: s } };
+  const f = [];
+  const prof = { id: "p", inputSchema: { maxNestingDepth: 5 } };
+  assert.doesNotThrow(() => checkProviderSchema("deep", s, prof, "default", (id, t, m) => f.push(m)));
+  assert.ok(f.some((m) => /nests 3000 deep/.test(m)));
+});
+
+test("cli inspect: a server that closes its stdin fails cleanly (no unhandled EPIPE)", () => {
+  // Closes stdin, then answers initialize: our follow-up writes hit a closed pipe.
+  const srv = 'require("fs").closeSync(0);console.log(JSON.stringify({jsonrpc:"2.0",id:1,result:{}}));setTimeout(()=>{},5000)';
+  const r = rrun(["inspect", "--", process.execPath, "-e", srv]);
+  noStack(r);
+  assert.equal(r.code, 2);
+});

@@ -14,6 +14,7 @@ const MUTATING =
 
 // --- core (agnostic) -------------------------------------------------------
 export function runCoreRules(tools, emit) {
+  if (!Array.isArray(tools)) return; // the CLI reports a non-array as meta/unrecognized-artifact
   const seen = new Set();
   tools.forEach((t, i) => {
     const where = t && typeof t === "object" ? (t.name ?? `#${i}`) : `#${i}`;
@@ -48,7 +49,7 @@ export function runCoreRules(tools, emit) {
           `inputSchema root type must be "object" (got ${JSON.stringify(s.type)}).`);
       if (Array.isArray(s.required) && s.properties && typeof s.properties === "object") {
         for (const r of s.required)
-          if (!(r in s.properties))
+          if (!Object.hasOwn(s.properties, r)) // not `in`: "constructor"/"toString" are inherited
             emit("tool/required-references-properties", where,
               `required lists "${r}" but it is not in properties.`);
       }
@@ -122,7 +123,14 @@ export function runProviderRules(tools, profiles, emit, mode = "default") {
   for (const p of profiles) {
     const tn = p.toolName ?? {};
     const td = p.toolDescription ?? {};
-    const re = tn.pattern ? new RegExp(tn.pattern) : null;
+    let re = null;
+    if (tn.pattern) {
+      try {
+        re = new RegExp(tn.pattern);
+      } catch (e) {
+        emit("meta/profile-invalid", null, `profile "${p.id}" toolName.pattern is not a valid regular expression: ${e.message}`, p.id);
+      }
+    }
 
     for (const t of tools) {
       if (!t || typeof t.name !== "string") continue;

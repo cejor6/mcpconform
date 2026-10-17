@@ -517,6 +517,13 @@
       "appliesTo": "meta",
       "source": "engine",
       "message": "The artifact could not be parsed as JSON."
+    },
+    {
+      "id": "meta/profile-invalid",
+      "tier": "error",
+      "appliesTo": "meta",
+      "source": "engine",
+      "message": "A targeted profile is malformed (e.g. toolName.pattern is not a valid regular expression); the affected check was skipped."
     }
   ]
 }
